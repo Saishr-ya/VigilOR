@@ -5,7 +5,7 @@ import SafetyLock from './SafetyLock';
 import EventLog from './EventLog';
 import { useItemTracking } from '../hooks/useItemTracking';
 
-const LiveMonitoring = ({ zones, externalStream }) => {
+const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
   const videoRef = useRef(null);
   const [displaySize, setDisplaySize] = useState({ width: 1, height: 1 });
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -259,7 +259,7 @@ const LiveMonitoring = ({ zones, externalStream }) => {
         </div>
 
         <div className="flex flex-col gap-6">
-          <SafetyLock incisionCount={counts.incision} onLock={() => console.log('Locked')} />
+          <SafetyLock incisionCount={counts.incision} onLock={onClosePatient} />
           <EventLog events={events} />
         </div>
       </div>

@@ -19,7 +19,6 @@ const SafetyLock = ({ incisionCount, onLock }) => {
   const handleConfirm = () => {
     onLock();
     setShowConfirm(false);
-    alert("Patient Closed Successfully. Surgery Complete.");
   };
 
   return (

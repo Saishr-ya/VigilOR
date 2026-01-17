@@ -14,6 +14,11 @@ function App() {
     setMode('monitoring');
   };
 
+  const handleClosePatient = () => {
+    setMode('calibration');
+    // Keep zones as they are, don't reset them
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <header className="mb-8 flex justify-between items-center">
@@ -35,7 +40,7 @@ function App() {
             onSave={handleSaveZones} 
           />
         ) : (
-          <LiveMonitoring zones={zones} />
+          <LiveMonitoring zones={zones} onClosePatient={handleClosePatient} />
         )}
       </main>
     </div>

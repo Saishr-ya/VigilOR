@@ -46,23 +46,21 @@ const ZoneCalibration = ({ onSave, initialZones }) => {
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [currentRect, setCurrentRect] = useState(null);
 
-  const getScaledCoordinates = (e) => {
-    if (!videoRef.current) return { x: 0, y: 0 };
+  const getNormalizedCoordinates = (e) => {
+    if (!containerRef.current) return { x: 0, y: 0 };
 
-    const rect = videoRef.current.getBoundingClientRect();
-    const video = videoRef.current;
+    const rect = containerRef.current.getBoundingClientRect();
+    const border = 2; // border-2 is 2px
 
-    const scaleX = video.videoWidth / rect.width;
-    const scaleY = video.videoHeight / rect.height;
+    // Calculate relative to the content box (inside border)
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left - border) / (rect.width - 2 * border)));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top - border) / (rect.height - 2 * border)));
 
-    return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
-    };
+    return { x, y };
   };
 
   const handleMouseDown = (e) => {
-    const coords = getScaledCoordinates(e);
+    const coords = getNormalizedCoordinates(e);
     setStartPos(coords);
     setIsDrawing(true);
     setCurrentRect({ x: coords.x, y: coords.y, w: 0, h: 0 });
@@ -71,7 +69,7 @@ const ZoneCalibration = ({ onSave, initialZones }) => {
   const handleMouseMove = (e) => {
     if (!isDrawing) return;
     
-    const coords = getScaledCoordinates(e);
+    const coords = getNormalizedCoordinates(e);
     const w = coords.x - startPos.x;
     const h = coords.y - startPos.y;
     
@@ -121,17 +119,23 @@ const ZoneCalibration = ({ onSave, initialZones }) => {
           // Helper to draw rect
           const drawZone = (rect, color, label) => {
             if (!rect) return;
+            // Convert normalized to pixel coordinates for drawing
+            const x1 = rect.x1 * canvas.width;
+            const y1 = rect.y1 * canvas.height;
+            const w = (rect.x2 - rect.x1) * canvas.width;
+            const h = (rect.y2 - rect.y1) * canvas.height;
+
             ctx.strokeStyle = color;
             ctx.lineWidth = 4;
-            ctx.strokeRect(rect.x1, rect.y1, rect.x2 - rect.x1, rect.y2 - rect.y1);
+            ctx.strokeRect(x1, y1, w, h);
             
             ctx.fillStyle = color;
             ctx.globalAlpha = 0.2;
-            ctx.fillRect(rect.x1, rect.y1, rect.x2 - rect.x1, rect.y2 - rect.y1);
+            ctx.fillRect(x1, y1, w, h);
             ctx.globalAlpha = 1.0;
             
             ctx.font = '24px Arial';
-            ctx.fillText(label, rect.x1, rect.y1 - 10);
+            ctx.fillText(label, x1, y1 - 10);
           };
 
           drawZone(zones.tray, '#22c55e', 'Tray Zone');
@@ -140,9 +144,15 @@ const ZoneCalibration = ({ onSave, initialZones }) => {
           // Draw current drawing rect
           if (isDrawing && currentRect) {
             const color = activeZone === 'tray' ? '#22c55e' : '#ef4444';
+            // Convert normalized currentRect to pixels
+            const x = currentRect.x * canvas.width;
+            const y = currentRect.y * canvas.height;
+            const w = currentRect.w * canvas.width;
+            const h = currentRect.h * canvas.height;
+
             ctx.strokeStyle = color;
             ctx.lineWidth = 2;
-            ctx.strokeRect(currentRect.x, currentRect.y, currentRect.w, currentRect.h);
+            ctx.strokeRect(x, y, w, h);
           }
         }
         requestAnimationFrame(render);
@@ -180,8 +190,7 @@ const ZoneCalibration = ({ onSave, initialZones }) => {
 
       <div 
         ref={containerRef}
-        className="relative rounded-lg overflow-hidden border-2 border-gray-300 shadow-lg cursor-crosshair"
-        style={{ maxWidth: '800px' }}
+        className="relative rounded-lg overflow-hidden border-2 border-gray-300 shadow-lg cursor-crosshair w-full"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}

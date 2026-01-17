@@ -7,43 +7,43 @@ import { useItemTracking } from '../hooks/useItemTracking';
 
 const LiveMonitoring = ({ zones, externalStream }) => {
   const videoRef = useRef(null);
-  const [scale, setScale] = useState({ x: 1, y: 1 });
+  const [displaySize, setDisplaySize] = useState({ width: 1, height: 1 });
   const [analysisResult, setAnalysisResult] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [apiError, setApiError] = useState(null);
+  const [retryCount, setRetryCount] = useState(0);
   const visionRef = useRef(null);
 
-  // Update scale when video resizes
+  // Update display size when video resizes
   useEffect(() => {
-    const updateScale = () => {
+    const updateSize = () => {
       const video = videoRef.current;
-      if (video && video.videoWidth > 0) {
-        // We use object-contain or h-auto, so displayed size might differ from intrinsic
-        // But if we use h-auto w-full, the aspect ratio is preserved.
-        // The scale is simply clientWidth / videoWidth
-        const currentScale = video.clientWidth / video.videoWidth;
-        setScale({ x: currentScale, y: currentScale });
+      if (video) {
+        setDisplaySize({ 
+          width: video.clientWidth, 
+          height: video.clientHeight 
+        });
       }
     };
 
     const video = videoRef.current;
     if (video) {
-      video.addEventListener('resize', updateScale);
-      video.addEventListener('loadedmetadata', updateScale);
+      video.addEventListener('resize', updateSize);
+      video.addEventListener('loadedmetadata', updateSize);
       // Initial check
-      updateScale();
+      updateSize();
       // Also window resize
-      window.addEventListener('resize', updateScale);
+      window.addEventListener('resize', updateSize);
     }
 
     return () => {
       if (video) {
-        video.removeEventListener('resize', updateScale);
-        video.removeEventListener('loadedmetadata', updateScale);
+        video.removeEventListener('resize', updateSize);
+        video.removeEventListener('loadedmetadata', updateSize);
       }
-      window.removeEventListener('resize', updateScale);
+      window.removeEventListener('resize', updateSize);
     };
-  }, [externalStream]); // Re-run if stream changes (might change resolution)
+  }, [externalStream]);
 
   const { trackedItems, events, counts } = useItemTracking(analysisResult);
 
@@ -60,18 +60,37 @@ const LiveMonitoring = ({ zones, externalStream }) => {
       return;
     }
 
-    const prompt = [
-      "Identify all clearly visible objects (surgical instruments, bottles, phones, etc).",
-      "For each object, return:",
-      "- type: short label (e.g. bottle, sponge, scissors)",
-      "- x: center x pixel",
-      "- y: center y pixel",
-      "",
-      `Tray bounds: x1=${zones.tray.x1}, x2=${zones.tray.x2}, y1=${zones.tray.y1}, y2=${zones.tray.y2}.`,
-      `Incision bounds: x1=${zones.incision.x1}, x2=${zones.incision.x2}, y1=${zones.incision.y1}, y2=${zones.incision.y2}.`,
-      "",
-      "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number, \"zone\": \"tray\" | \"incision\" | null}] }"
-    ].join(" ");
+      // Convert normalized zones to pixels for the prompt
+      const video = videoRef.current;
+      const width = video ? video.videoWidth : 1280;
+      const height = video ? video.videoHeight : 720;
+
+      const tray = {
+        x1: Math.round(zones.tray.x1 * width),
+        y1: Math.round(zones.tray.y1 * height),
+        x2: Math.round(zones.tray.x2 * width),
+        y2: Math.round(zones.tray.y2 * height)
+      };
+
+      const incision = {
+        x1: Math.round(zones.incision.x1 * width),
+        y1: Math.round(zones.incision.y1 * height),
+        x2: Math.round(zones.incision.x2 * width),
+        y2: Math.round(zones.incision.y2 * height)
+      };
+
+      const prompt = [
+        "Identify all clearly visible objects (surgical instruments, bottles, phones, etc).",
+        "For each object, return:",
+        "- type: short label (e.g. bottle, sponge, scissors)",
+        "- x: center x pixel",
+        "- y: center y pixel",
+        "",
+        `Tray bounds: x1=${tray.x1}, x2=${tray.x2}, y1=${tray.y1}, y2=${tray.y2}.`,
+        `Incision bounds: x1=${incision.x1}, x2=${incision.x2}, y1=${incision.y1}, y2=${incision.y2}.`,
+        "",
+        "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number, \"zone\": \"tray\" | \"incision\" | null}] }"
+      ].join(" ");
 
     // Config options
     const config = {
@@ -113,16 +132,29 @@ const LiveMonitoring = ({ zones, externalStream }) => {
           
           const normalizedItems = (parsed.items || []).map(item => {
             let zone = item.zone;
-            if (!zone && typeof item.x === 'number' && typeof item.y === 'number') {
-               if (item.x >= zones.tray.x1 && item.x <= zones.tray.x2 &&
-                   item.y >= zones.tray.y1 && item.y <= zones.tray.y2) {
+            
+            // Convert pixels to normalized
+            const video = videoRef.current;
+            const width = video ? video.videoWidth : 1280;
+            const height = video ? video.videoHeight : 720;
+            
+            // Ensure coordinates exist
+            const x = typeof item.x === 'number' ? item.x : 0;
+            const y = typeof item.y === 'number' ? item.y : 0;
+
+            const xNorm = x / width;
+            const yNorm = y / height;
+
+            if (!zone) {
+               if (xNorm >= zones.tray.x1 && xNorm <= zones.tray.x2 &&
+                   yNorm >= zones.tray.y1 && yNorm <= zones.tray.y2) {
                  zone = 'tray';
-               } else if (item.x >= zones.incision.x1 && item.x <= zones.incision.x2 &&
-                          item.y >= zones.incision.y1 && item.y <= zones.incision.y2) {
+               } else if (xNorm >= zones.incision.x1 && xNorm <= zones.incision.x2 &&
+                          yNorm >= zones.incision.y1 && yNorm <= zones.incision.y2) {
                  zone = 'incision';
                }
             }
-            return { ...item, zone };
+            return { ...item, x: xNorm, y: yNorm, zone };
           });
           
           setAnalysisResult({
@@ -180,8 +212,8 @@ const LiveMonitoring = ({ zones, externalStream }) => {
                    item.zone === 'incision' ? 'bg-red-500' : 'bg-green-500'
                  }`}
                  style={{ 
-                   left: item.x * scale.x, 
-                   top: item.y * scale.y, 
+                   left: item.x * displaySize.width, 
+                   top: item.y * displaySize.height, 
                    transform: 'translate(-50%, -50%)',
                    opacity: (Date.now() - item.lastSeen) > 1000 ? 0.5 : 1
                  }}
@@ -198,19 +230,19 @@ const LiveMonitoring = ({ zones, externalStream }) => {
                   <div 
                     className="absolute border-2 border-green-500/30 bg-green-500/10 pointer-events-none"
                     style={{
-                        left: zones.tray.x1 * scale.x,
-                        top: zones.tray.y1 * scale.y,
-                        width: (zones.tray.x2 - zones.tray.x1) * scale.x,
-                        height: (zones.tray.y2 - zones.tray.y1) * scale.y
+                        left: zones.tray.x1 * displaySize.width,
+                        top: zones.tray.y1 * displaySize.height,
+                        width: (zones.tray.x2 - zones.tray.x1) * displaySize.width,
+                        height: (zones.tray.y2 - zones.tray.y1) * displaySize.height
                     }}
                   />
                   <div 
                     className="absolute border-2 border-red-500/30 bg-red-500/10 pointer-events-none"
                     style={{
-                        left: zones.incision.x1 * scale.x,
-                        top: zones.incision.y1 * scale.y,
-                        width: (zones.incision.x2 - zones.incision.x1) * scale.x,
-                        height: (zones.incision.y2 - zones.incision.y1) * scale.y
+                        left: zones.incision.x1 * displaySize.width,
+                        top: zones.incision.y1 * displaySize.height,
+                        width: (zones.incision.x2 - zones.incision.x1) * displaySize.width,
+                        height: (zones.incision.y2 - zones.incision.y1) * displaySize.height
                     }}
                   />
                 </>

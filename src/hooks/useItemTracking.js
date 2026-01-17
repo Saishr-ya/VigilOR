@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 
+const ZONE_STABLE_FRAMES = 2;
+
 export const useItemTracking = (analysisResult) => {
   const [trackedItems, setTrackedItems] = useState([]);
   const [events, setEvents] = useState([]);
@@ -40,7 +42,8 @@ export const useItemTracking = (analysisResult) => {
           Math.pow(item.y - detection.y, 2)
         );
         
-        if (dist < 100 && dist < minDist) {
+        // Threshold for normalized coordinates (0.1 = 10% of screen)
+        if (dist < 0.1 && dist < minDist) {
           minDist = dist;
           bestMatchIndex = idx;
         }
@@ -49,45 +52,75 @@ export const useItemTracking = (analysisResult) => {
       if (bestMatchIndex !== -1) {
         matchedIndices.add(bestMatchIndex);
         const item = currentItems[bestMatchIndex];
-        
-        if (item.zone !== detection.zone) {
-          const eventType = detection.zone === 'incision' ? 'entry' : 'exit';
-          const newEvent = {
-            id: Date.now() + Math.random(),
-            timestamp: Date.now(),
-            type: eventType,
-            itemType: item.type,
-            from: item.zone,
-            to: detection.zone
-          };
-          setEvents(prev => [newEvent, ...prev]);
-          console.log("[useItemTracking] Zone change", newEvent);
 
-          const key = item.type + ":" + item.id;
-          if (detection.zone === "incision" && !inPatientRef.current.has(key)) {
-            inPatientRef.current.add(key);
-            console.log("[useItemTracking] Added to itemsInPatient", key);
+        const nextZone = detection.zone;
+        const prevStableZone = item.stableZone != null ? item.stableZone : item.zone;
+
+        let stableZone = prevStableZone;
+        let pendingZone = item.pendingZone != null ? item.pendingZone : prevStableZone;
+        let pendingCount = item.pendingCount != null ? item.pendingCount : 0;
+
+        if (nextZone === stableZone) {
+          pendingZone = stableZone;
+          pendingCount = 0;
+        } else {
+          if (nextZone === pendingZone) {
+            pendingCount += 1;
+          } else {
+            pendingZone = nextZone;
+            pendingCount = 1;
           }
-          if (detection.zone !== "incision" && inPatientRef.current.has(key)) {
-            inPatientRef.current.delete(key);
-            console.log("[useItemTracking] Removed from itemsInPatient", key);
+
+          if (pendingCount >= ZONE_STABLE_FRAMES && nextZone !== stableZone) {
+            const eventType = nextZone === 'incision' ? 'entry' : 'exit';
+            const newEvent = {
+              id: Date.now() + Math.random(),
+              timestamp: Date.now(),
+              type: eventType,
+              itemType: item.type,
+              from: stableZone,
+              to: nextZone
+            };
+            setEvents(prev => [newEvent, ...prev]);
+            console.log("[useItemTracking] Zone change", newEvent);
+
+            const key = item.type + ":" + item.id;
+            if (nextZone === "incision" && !inPatientRef.current.has(key)) {
+              inPatientRef.current.add(key);
+              console.log("[useItemTracking] Added to itemsInPatient", key);
+            }
+            if (nextZone !== "incision" && inPatientRef.current.has(key)) {
+              inPatientRef.current.delete(key);
+              console.log("[useItemTracking] Removed from itemsInPatient", key);
+            }
+
+            stableZone = nextZone;
+            pendingZone = nextZone;
+            pendingCount = 0;
           }
         }
-        
+
         currentItems[bestMatchIndex] = {
           ...item,
           x: detection.x,
           y: detection.y,
-          zone: detection.zone,
+          zone: stableZone,
+          stableZone,
+          pendingZone,
+          pendingCount,
           lastSeen: timestamp
         };
       } else {
+        const initialZone = detection.zone;
         const newItem = {
-          id: Date.now() + Math.random(), // Temporary ID
+          id: Date.now() + Math.random(),
           type: detection.type,
           x: detection.x,
           y: detection.y,
-          zone: detection.zone,
+          zone: initialZone,
+          stableZone: initialZone,
+          pendingZone: initialZone,
+          pendingCount: 0,
           lastSeen: timestamp,
           firstSeen: timestamp
         };

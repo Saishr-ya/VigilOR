@@ -1,10 +1,41 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useCamera } from '../hooks/useCamera';
 import { MousePointer2, Check, RotateCcw } from 'lucide-react';
 
 const ZoneCalibration = ({ onSave, initialZones }) => {
-  const { videoRef, canvasRef } = useCamera();
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const containerRef = useRef(null);
+
+  useEffect(() => {
+    let stream = null;
+
+    const startCamera = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      } catch (err) {
+        console.error("Error accessing camera for calibration:", err);
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
   
   const [activeZone, setActiveZone] = useState('tray'); // 'tray' or 'incision'
   const [isDrawing, setIsDrawing] = useState(false);
@@ -16,15 +47,14 @@ const ZoneCalibration = ({ onSave, initialZones }) => {
   const [currentRect, setCurrentRect] = useState(null);
 
   const getScaledCoordinates = (e) => {
-    if (!videoRef.current || !containerRef.current) return { x: 0, y: 0 };
-    
-    const rect = containerRef.current.getBoundingClientRect();
+    if (!videoRef.current) return { x: 0, y: 0 };
+
+    const rect = videoRef.current.getBoundingClientRect();
     const video = videoRef.current;
-    
-    // Calculate scaling factors
+
     const scaleX = video.videoWidth / rect.width;
     const scaleY = video.videoHeight / rect.height;
-    
+
     return {
       x: (e.clientX - rect.left) * scaleX,
       y: (e.clientY - rect.top) * scaleY

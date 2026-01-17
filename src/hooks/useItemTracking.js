@@ -5,20 +5,22 @@ export const useItemTracking = (analysisResult) => {
   const [events, setEvents] = useState([]);
   const [counts, setCounts] = useState({ tray: 0, incision: 0 });
 
-  // Refs to keep track of state inside effect without triggering re-renders loop
   const itemsRef = useRef([]);
+  const inPatientRef = useRef(new Set());
 
   useEffect(() => {
-    if (!analysisResult || !analysisResult.items) return;
+    if (!analysisResult || !analysisResult.items) {
+      return;
+    }
+
+    console.log("[useItemTracking] New analysis result", analysisResult);
 
     const timestamp = Date.now();
     const newDetections = analysisResult.items;
+    console.log("[useItemTracking] Detections count", newDetections.length);
     
-    // Deep copy current items
     let currentItems = [...itemsRef.current];
     
-    // 1. Match new detections to existing items
-    // Simple greedy matching: find closest item of same type
     const matchedIndices = new Set();
     
     newDetections.forEach(detection => {
@@ -26,16 +28,18 @@ export const useItemTracking = (analysisResult) => {
       let minDist = Infinity;
       
       currentItems.forEach((item, idx) => {
-        if (matchedIndices.has(idx)) return; // Already matched
-        if (item.type !== detection.type) return; // Type mismatch
-        
-        // Calculate distance
+        if (matchedIndices.has(idx)) {
+          return;
+        }
+        if (item.type !== detection.type) {
+          return;
+        }
+
         const dist = Math.sqrt(
           Math.pow(item.x - detection.x, 2) + 
           Math.pow(item.y - detection.y, 2)
         );
         
-        // Threshold for matching (e.g., 100 pixels)
         if (dist < 100 && dist < minDist) {
           minDist = dist;
           bestMatchIndex = idx;
@@ -43,11 +47,9 @@ export const useItemTracking = (analysisResult) => {
       });
       
       if (bestMatchIndex !== -1) {
-        // Update matched item
         matchedIndices.add(bestMatchIndex);
         const item = currentItems[bestMatchIndex];
         
-        // Check for zone change
         if (item.zone !== detection.zone) {
           const eventType = detection.zone === 'incision' ? 'entry' : 'exit';
           const newEvent = {
@@ -59,6 +61,17 @@ export const useItemTracking = (analysisResult) => {
             to: detection.zone
           };
           setEvents(prev => [newEvent, ...prev]);
+          console.log("[useItemTracking] Zone change", newEvent);
+
+          const key = item.type + ":" + item.id;
+          if (detection.zone === "incision" && !inPatientRef.current.has(key)) {
+            inPatientRef.current.add(key);
+            console.log("[useItemTracking] Added to itemsInPatient", key);
+          }
+          if (detection.zone !== "incision" && inPatientRef.current.has(key)) {
+            inPatientRef.current.delete(key);
+            console.log("[useItemTracking] Removed from itemsInPatient", key);
+          }
         }
         
         currentItems[bestMatchIndex] = {
@@ -69,8 +82,7 @@ export const useItemTracking = (analysisResult) => {
           lastSeen: timestamp
         };
       } else {
-        // New item detected
-        currentItems.push({
+        const newItem = {
           id: Date.now() + Math.random(), // Temporary ID
           type: detection.type,
           x: detection.x,
@@ -78,12 +90,19 @@ export const useItemTracking = (analysisResult) => {
           zone: detection.zone,
           lastSeen: timestamp,
           firstSeen: timestamp
-        });
+        };
+
+        currentItems.push(newItem);
+        console.log("[useItemTracking] New item detected", newItem);
+
+        const key = newItem.type + ":" + newItem.id;
+        if (newItem.zone === "incision") {
+          inPatientRef.current.add(key);
+          console.log("[useItemTracking] Added to itemsInPatient", key);
+        }
       }
     });
     
-    // 2. Prune old items (Grace period: 3 seconds)
-    // Filter out items that haven't been seen in 3000ms
     currentItems = currentItems.filter(item => {
       return (timestamp - item.lastSeen) < 3000;
     });
@@ -92,7 +111,6 @@ export const useItemTracking = (analysisResult) => {
     itemsRef.current = currentItems;
     setTrackedItems(currentItems);
     
-    // Update counts based on tracked items (which includes grace period items)
     const newCounts = currentItems.reduce((acc, item) => {
       if (item.zone === 'tray') acc.tray++;
       if (item.zone === 'incision') acc.incision++;

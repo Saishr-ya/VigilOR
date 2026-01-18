@@ -275,28 +275,35 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
             const incisionMarginX = 0.0;
             const incisionMarginY = 0.0;
 
-            const zonesForClassification = zones;
-
-            const trayX1 = Math.max(0, zonesForClassification.tray.x1 - trayMarginX);
-            const trayX2 = Math.min(1, zonesForClassification.tray.x2 + trayMarginX);
-            const trayY1 = Math.max(0, zonesForClassification.tray.y1 - trayMarginY);
-            const trayY2 = Math.min(1, zonesForClassification.tray.y2 + trayMarginY);
-
-            const incisionX1 = Math.max(0, zonesForClassification.incision.x1 - incisionMarginX);
-            const incisionX2 = Math.min(1, zonesForClassification.incision.x2 + incisionMarginX);
-            const incisionY1 = Math.max(0, zonesForClassification.incision.y1 - incisionMarginY);
-            const incisionY2 = Math.min(1, zonesForClassification.incision.y2 + incisionMarginY);
-
             let zone = null;
-            const inTray = xNorm >= trayX1 && xNorm <= trayX2 &&
-                           yNorm >= trayY1 && yNorm <= trayY2;
-            const inIncision = xNorm >= incisionX1 && xNorm <= incisionX2 &&
-                               yNorm >= incisionY1 && yNorm <= incisionY2;
 
-            if (inIncision) {
-              zone = 'incision';
-            } else if (inTray) {
-              zone = 'tray';
+            if (typeof item.zone === 'string') {
+              if (item.zone === 'tray' || item.zone === 'incision') {
+                zone = item.zone;
+              }
+            }
+
+            if (!zone && zones && zones.tray && zones.incision) {
+              const trayX1 = Math.max(0, zones.tray.x1 - trayMarginX);
+              const trayX2 = Math.min(1, zones.tray.x2 + trayMarginX);
+              const trayY1 = Math.max(0, zones.tray.y1 - trayMarginY);
+              const trayY2 = Math.min(1, zones.tray.y2 + trayMarginY);
+
+              const incisionX1 = Math.max(0, zones.incision.x1 - incisionMarginX);
+              const incisionX2 = Math.min(1, zones.incision.x2 + incisionMarginX);
+              const incisionY1 = Math.max(0, zones.incision.y1 - incisionMarginY);
+              const incisionY2 = Math.min(1, zones.incision.y2 + incisionMarginY);
+
+              const inTray = xNorm >= trayX1 && xNorm <= trayX2 &&
+                             yNorm >= trayY1 && yNorm <= trayY2;
+              const inIncision = xNorm >= incisionX1 && xNorm <= incisionX2 &&
+                                 yNorm >= incisionY1 && yNorm <= incisionY2;
+
+              if (inIncision) {
+                zone = 'incision';
+              } else if (inTray) {
+                zone = 'tray';
+              }
             }
 
             return { ...item, x: xNorm, y: yNorm, zone };
@@ -725,16 +732,18 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
       ? baselineTrayCount + baselineIncisionCount
       : null;
 
+  const hasValidBaseline = baselineTotal != null && baselineTotal > 0;
+
   const stableTrayCountFromTracking = trackedItems.filter(item => item.zone === 'tray').length;
   const stableIncisionCountFromTracking = trackedItems.filter(item => item.zone === 'incision').length;
 
   const effectiveIncisionCount =
-    baselineTotal != null
+    hasValidBaseline
       ? Math.min(baselineTotal, stableIncisionCountFromTracking)
       : stableIncisionCountFromTracking;
 
   const effectiveTrayCount =
-    baselineTotal != null
+    hasValidBaseline
       ? Math.max(0, baselineTotal - effectiveIncisionCount)
       : stableTrayCountFromTracking;
 

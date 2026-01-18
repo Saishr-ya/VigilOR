@@ -178,22 +178,23 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
     };
 
     const prompt = [
-      "Identify all clearly visible surgical instruments (scissor, retractor, mallet, elevator, forceps, syringe).",
-      "For each instrument, return:",
-      "- type: short label",
+      "Identify all clearly visible objects (surgical instruments, bottles, phones, etc).",
+      "For each object, return:",
+      "- type: short label (e.g. bottle, sponge, scissors)",
       "- x: center x pixel",
       "- y: center y pixel",
       "",
       `Tray bounds: x1=${tray.x1}, x2=${tray.x2}, y1=${tray.y1}, y2=${tray.y2}.`,
       `Incision bounds: x1=${incision.x1}, x2=${incision.x2}, y1=${incision.y1}, y2=${incision.y2}.`,
       "",
-      "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number}] }"
+      "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number, \"zone\": \"tray\" | \"incision\" | null}] }"
     ].join(" ");
 
     setSnapshotMode(false);
 
     const sourceConfig = {
-      type: 'camera'
+      type: 'camera',
+      cameraFacing: 'environment'
     };
 
     const config = {
@@ -212,10 +213,13 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               properties: {
                 type: { type: 'string' },
                 x: { type: 'number' },
-                y: { type: 'number' }
+                y: { type: 'number' },
+                zone: { type: 'string', enum: ['tray', 'incision', null] }
               }
             }
-          }
+          },
+          tray_count: { type: 'number' },
+          incision_count: { type: 'number' }
         }
       },
       onResult: (result) => {
@@ -249,14 +253,6 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
 
           console.log("[LiveMonitoring] Vision Result:", parsed);
 
-          const baseZones = dynamicZonesRef.current || zones;
-          const updatedZones = trackZonesWithTemplate(videoRef.current, baseZones, zoneTemplatesRef);
-          const finalZones = updatedZones || baseZones;
-          if (finalZones) {
-            dynamicZonesRef.current = finalZones;
-            setDynamicZones(finalZones);
-          }
-
           const normalizedItems = (parsed.items || []).map(item => {
             const currentVideo = videoRef.current;
             const w = currentVideo ? currentVideo.videoWidth : 1280;
@@ -274,12 +270,12 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               yNorm = h ? y / h : 0;
             }
 
-            const trayMarginX = 0.02;
-            const trayMarginY = 0.02;
-            const incisionMarginX = 0.05;
-            const incisionMarginY = 0.05;
+            const trayMarginX = 0.0;
+            const trayMarginY = 0.0;
+            const incisionMarginX = 0.0;
+            const incisionMarginY = 0.0;
 
-            const zonesForClassification = finalZones || zones;
+            const zonesForClassification = zones;
 
             const trayX1 = Math.max(0, zonesForClassification.tray.x1 - trayMarginX);
             const trayX2 = Math.min(1, zonesForClassification.tray.x2 + trayMarginX);
@@ -318,19 +314,24 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
       }
     };
 
-    const vision = new RealtimeVision(config);
-
-    visionRef.current = vision;
-
-    vision.start()
-      .then(() => {
-        setIsProcessing(true);
-      })
-      .catch(err => {
-        console.error("[LiveMonitoring] Failed to start vision", err);
-        setApiError(err.message);
-        setIsProcessing(false);
-      });
+    let visionInstance = null;
+    try {
+      visionInstance = new RealtimeVision(config);
+      visionRef.current = visionInstance;
+      visionInstance.start()
+        .then(() => {
+          setIsProcessing(true);
+        })
+        .catch(err => {
+          console.error("[LiveMonitoring] Failed to start vision", err);
+          setApiError(err.message);
+          setIsProcessing(false);
+        });
+    } catch (err) {
+      console.error("[LiveMonitoring] Error creating RealtimeVision", err);
+      setApiError(err.message || "Failed to initialize vision");
+      setIsProcessing(false);
+    }
 
     return () => {
       if (visionRef.current) {
@@ -909,7 +910,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
             })}
              
              {(() => {
-               const zonesToRender = dynamicZones || zones;
+               const zonesToRender = zones;
                if (!zonesToRender || !zonesToRender.tray || !zonesToRender.incision) {
                  return null;
                }

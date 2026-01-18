@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 
-const MATCH_THRESHOLD = 0.12;
-const MERGE_THRESHOLD = 0.12;
+const MATCH_THRESHOLD = 0.08;
+const MERGE_THRESHOLD = 0.05;
 const ZONE_STABLE_FRAMES = 1;
 const ITEM_STALE_MS = 1000;
 
@@ -79,7 +79,7 @@ export const useItemTracking = (analysisResult) => {
           const dx = item.x - detection.x;
           const dy = item.y - detection.y;
           const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < 0.15 && d < fallbackDist) {
+          if (d < 0.1 && d < fallbackDist) {
             fallbackDist = d;
             fallbackIndex = idx;
           }

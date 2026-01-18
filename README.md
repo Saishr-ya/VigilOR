@@ -7,7 +7,7 @@
 
 > **The AI that doesn't blink** - Real-time surgical instrument tracking to prevent retained surgical items and enhance patient safety.
 
-![VigilOR Demo](https://youtu.be/kac0_l-eE4E?si=oi6uii7ri_S5dDIJ)
+Demo - https://youtu.be/kac0_l-eE4E?si=oi6uii7ri_S5dDIJ
 
 ## 🎯 Problem Statement
 

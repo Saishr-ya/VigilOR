@@ -8,6 +8,8 @@ function App() {
     tray: null,
     incision: null
   });
+  const [videoMode, setVideoMode] = useState('camera');
+  const [videoFileUrl, setVideoFileUrl] = useState(null);
 
   const handleSaveZones = (newZones) => {
     setZones(newZones);
@@ -38,9 +40,20 @@ function App() {
           <ZoneCalibration 
             initialZones={zones} 
             onSave={handleSaveZones} 
+            videoMode={videoMode}
+            videoFileUrl={videoFileUrl}
+            onVideoModeChange={setVideoMode}
+            onVideoFileChange={setVideoFileUrl}
           />
         ) : (
-          <LiveMonitoring zones={zones} onClosePatient={handleClosePatient} />
+          <LiveMonitoring 
+            zones={zones} 
+            onClosePatient={handleClosePatient} 
+            videoMode={videoMode}
+            videoFileUrl={videoFileUrl}
+            onVideoModeChange={setVideoMode}
+            onVideoFileChange={setVideoFileUrl}
+          />
         )}
       </main>
     </div>

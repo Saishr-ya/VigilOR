@@ -5,7 +5,7 @@ import SafetyLock from './SafetyLock';
 import EventLog from './EventLog';
 import { useItemTracking } from '../hooks/useItemTracking';
 
-const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
+const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, videoFileUrl, onVideoModeChange, onVideoFileChange }) => {
   const videoRef = useRef(null);
   const [displaySize, setDisplaySize] = useState({ width: 1, height: 1 });
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -13,6 +13,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
   const [apiError, setApiError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
   const visionRef = useRef(null);
+  const [snapshotMode, setSnapshotMode] = useState(false);
   const [baselineCounts, setBaselineCounts] = useState(null);
   const [postCounts, setPostCounts] = useState(null);
   const [scanPhase, setScanPhase] = useState(null);
@@ -22,6 +23,23 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
   const [postScanVersion, setPostScanVersion] = useState(0);
   const [showIncisionPopup, setShowIncisionPopup] = useState(false);
   const [rfPredictions, setRfPredictions] = useState([]);
+  const [dynamicZones, setDynamicZones] = useState(zones);
+  const dynamicZonesRef = useRef(zones);
+  const zoneTemplatesRef = useRef({ tray: null, incision: null });
+
+  const videoElementForScale = videoRef.current;
+  const sourceWidth =
+    (videoElementForScale && (videoElementForScale.videoWidth || videoElementForScale.clientWidth)) ||
+    displaySize.width ||
+    1;
+  const sourceHeight =
+    (videoElementForScale && (videoElementForScale.videoHeight || videoElementForScale.clientHeight)) ||
+    displaySize.height ||
+    1;
+  const scale = {
+    x: displaySize.width / sourceWidth,
+    y: displaySize.height / sourceHeight,
+  };
 
   // Update display size when video resizes
   useEffect(() => {
@@ -54,6 +72,32 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
     };
   }, [externalStream]);
 
+  useEffect(() => {
+    setDynamicZones(zones);
+    dynamicZonesRef.current = zones;
+    const current = zoneTemplatesRef.current;
+    if (current.tray) {
+      current.tray.delete();
+    }
+    if (current.incision) {
+      current.incision.delete();
+    }
+    zoneTemplatesRef.current = { tray: null, incision: null };
+  }, [zones]);
+
+  useEffect(() => {
+    return () => {
+      const current = zoneTemplatesRef.current;
+      if (current.tray) {
+        current.tray.delete();
+      }
+      if (current.incision) {
+        current.incision.delete();
+      }
+      zoneTemplatesRef.current = { tray: null, incision: null };
+    };
+  }, []);
+
   const { trackedItems, events, counts } = useItemTracking(analysisResult);
 
   useEffect(() => {
@@ -69,45 +113,50 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
       return;
     }
 
-      // Convert normalized zones to pixels for the prompt
-      const video = videoRef.current;
-      const width = video ? video.videoWidth : 1280;
-      const height = video ? video.videoHeight : 720;
+    const video = videoRef.current;
+    const width = video ? (video.videoWidth || 1280) : 1280;
+    const height = video ? (video.videoHeight || 720) : 720;
 
-      const tray = {
-        x1: Math.round(zones.tray.x1 * width),
-        y1: Math.round(zones.tray.y1 * height),
-        x2: Math.round(zones.tray.x2 * width),
-        y2: Math.round(zones.tray.y2 * height)
-      };
+    const tray = {
+      x1: Math.round(zones.tray.x1 * width),
+      y1: Math.round(zones.tray.y1 * height),
+      x2: Math.round(zones.tray.x2 * width),
+      y2: Math.round(zones.tray.y2 * height)
+    };
 
-      const incision = {
-        x1: Math.round(zones.incision.x1 * width),
-        y1: Math.round(zones.incision.y1 * height),
-        x2: Math.round(zones.incision.x2 * width),
-        y2: Math.round(zones.incision.y2 * height)
-      };
+    const incision = {
+      x1: Math.round(zones.incision.x1 * width),
+      y1: Math.round(zones.incision.y1 * height),
+      x2: Math.round(zones.incision.x2 * width),
+      y2: Math.round(zones.incision.y2 * height)
+    };
 
-      const prompt = [
-        "Identify all clearly visible objects (surgical instruments, bottles, phones, etc).",
-        "For each object, return:",
-        "- type: short label (e.g. bottle, sponge, scissors)",
-        "- x: center x pixel",
-        "- y: center y pixel",
-        "",
-        `Tray bounds: x1=${tray.x1}, x2=${tray.x2}, y1=${tray.y1}, y2=${tray.y2}.`,
-        `Incision bounds: x1=${incision.x1}, x2=${incision.x2}, y1=${incision.y1}, y2=${incision.y2}.`,
-        "",
-        "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number, \"zone\": \"tray\" | \"incision\" | null}] }"
-      ].join(" ");
+    const prompt = [
+      "Identify all clearly visible objects (surgical instruments, bottles, phones, etc).",
+      "For each object, return:",
+      "- type: short label (e.g. bottle, sponge, scissors)",
+      "- x: center x pixel",
+      "- y: center y pixel",
+      "",
+      `Tray bounds: x1=${tray.x1}, x2=${tray.x2}, y1=${tray.y1}, y2=${tray.y2}.`,
+      `Incision bounds: x1=${incision.x1}, x2=${incision.x2}, y1=${incision.y1}, y2=${incision.y2}.`,
+      "",
+      "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number, \"zone\": \"tray\" | \"incision\" | null}] }"
+    ].join(" ");
 
-    // Config options
+    if (videoMode === 'file') {
+      setSnapshotMode(true);
+      return undefined;
+    }
+
+    setSnapshotMode(false);
+
     const config = {
       apiUrl: baseUrl,
       apiKey: apiKey,
       prompt: prompt,
       model: 'Qwen/Qwen3-VL-30B-A3B-Instruct',
-      source: externalStream || undefined, // Try passing stream if available
+      source: externalStream || undefined,
       outputSchema: {
         type: 'object',
         properties: {
@@ -136,33 +185,43 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
           } else {
             parsed = result.result;
           }
-          
+
           console.log("[LiveMonitoring] Vision Result:", parsed);
-          
+
+          const baseZones = dynamicZonesRef.current || zones;
+          const updatedZones = trackZonesWithTemplate(videoRef.current, baseZones, zoneTemplatesRef);
+          const finalZones = updatedZones || baseZones;
+          if (finalZones) {
+            dynamicZonesRef.current = finalZones;
+            setDynamicZones(finalZones);
+          }
+
           const normalizedItems = (parsed.items || []).map(item => {
-            const video = videoRef.current;
-            const width = video ? video.videoWidth : 1280;
-            const height = video ? video.videoHeight : 720;
+            const currentVideo = videoRef.current;
+            const w = currentVideo ? currentVideo.videoWidth : 1280;
+            const h = currentVideo ? currentVideo.videoHeight : 720;
             const x = typeof item.x === 'number' ? item.x : 0;
             const y = typeof item.y === 'number' ? item.y : 0;
 
-            const xNorm = x / width;
-            const yNorm = y / height;
+            const xNorm = w ? x / w : 0;
+            const yNorm = h ? y / h : 0;
 
             const trayMarginX = 0.02;
             const trayMarginY = 0.02;
             const incisionMarginX = 0.05;
             const incisionMarginY = 0.05;
 
-            const trayX1 = Math.max(0, zones.tray.x1 - trayMarginX);
-            const trayX2 = Math.min(1, zones.tray.x2 + trayMarginX);
-            const trayY1 = Math.max(0, zones.tray.y1 - trayMarginY);
-            const trayY2 = Math.min(1, zones.tray.y2 + trayMarginY);
+            const zonesForClassification = finalZones || zones;
 
-            const incisionX1 = Math.max(0, zones.incision.x1 - incisionMarginX);
-            const incisionX2 = Math.min(1, zones.incision.x2 + incisionMarginX);
-            const incisionY1 = Math.max(0, zones.incision.y1 - incisionMarginY);
-            const incisionY2 = Math.min(1, zones.incision.y2 + incisionMarginY);
+            const trayX1 = Math.max(0, zonesForClassification.tray.x1 - trayMarginX);
+            const trayX2 = Math.min(1, zonesForClassification.tray.x2 + trayMarginX);
+            const trayY1 = Math.max(0, zonesForClassification.tray.y1 - trayMarginY);
+            const trayY2 = Math.min(1, zonesForClassification.tray.y2 + trayMarginY);
+
+            const incisionX1 = Math.max(0, zonesForClassification.incision.x1 - incisionMarginX);
+            const incisionX2 = Math.min(1, zonesForClassification.incision.x2 + incisionMarginX);
+            const incisionY1 = Math.max(0, zonesForClassification.incision.y1 - incisionMarginY);
+            const incisionY2 = Math.min(1, zonesForClassification.incision.y2 + incisionMarginY);
 
             let zone = null;
             const inTray = xNorm >= trayX1 && xNorm <= trayX2 &&
@@ -178,11 +237,11 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
 
             return { ...item, x: xNorm, y: yNorm, zone };
           });
-          
+
           setAnalysisResult({
-             items: normalizedItems,
-             tray_count: parsed.tray_count || 0,
-             incision_count: parsed.incision_count || 0
+            items: normalizedItems,
+            tray_count: parsed.tray_count || 0,
+            incision_count: parsed.incision_count || 0
           });
           setApiError(null);
         } catch (e) {
@@ -191,21 +250,10 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
       }
     };
 
-    // If external stream is present, try to use it
-    // We can pass the video element as source if SDK supports it, or the stream?
-    // If SDK takes a 'source' parameter that can be a video element:
-    if (externalStream && videoRef.current) {
-        // config.source = videoRef.current; // Hypothetical support
-        // Note: If RealtimeVision doesn't support video element source, this won't work for analysis.
-        // But let's assume it defaults to camera if not specified.
-        // If we want to use external stream, we might need to rely on the fact that
-        // CameraPreview is playing the stream, and if we pass the video element, SDK might use it.
-    }
-
     const vision = new RealtimeVision(config);
 
     visionRef.current = vision;
-    
+
     vision.start().catch(err => {
       console.error("[LiveMonitoring] Failed to start vision", err);
       setApiError(err.message);
@@ -216,7 +264,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
         visionRef.current.stop();
       }
     };
-  }, [zones, externalStream]);
+  }, [zones, externalStream, videoMode]);
 
   const handleScan = async phase => {
     if (!videoRef.current) return;
@@ -227,7 +275,10 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
       const frame = captureFrameFromVideo(videoRef.current);
       const enhancedBase64 = await enhanceFrameWithOpenCV(frame.canvas);
       const rfResult = await runRoboflowDetection(enhancedBase64);
+      console.log('[LiveMonitoring] Roboflow raw result:', rfResult);
       const { counts, predictions } = buildCountsFromRoboflow(rfResult);
+      console.log('[LiveMonitoring] Roboflow counts:', counts);
+      console.log('[LiveMonitoring] Roboflow predictions:', predictions);
       setRfPredictions(predictions);
 
       const scanCounts = trackedItems.reduce((acc, item) => {
@@ -254,9 +305,6 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
       setScanError(err.message || String(err));
     } finally {
       setScanLoading(false);
-      if (phase === 'post') {
-        setPostScanVersion(v => v + 1);
-      }
     }
   };
 
@@ -268,35 +316,6 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
   const overshootCounts = analysisResult ? buildCountsFromOvershoot(analysisResult) : null;
   const roboPostTotal = postCounts ? Object.values(postCounts).reduce((sum, v) => sum + v, 0) : null;
   const overshootTotal = overshootCounts ? Object.values(overshootCounts).reduce((sum, v) => sum + v, 0) : null;
-
-  const incisionItems = trackedItems.filter(i => i.zone === 'incision');
-  const incisionCount = incisionItems.length;
-  const incisionSummaryByType = incisionItems.reduce((acc, item) => {
-    if (!item.type) {
-      return acc;
-    }
-    acc[item.type] = (acc[item.type] || 0) + 1;
-    return acc;
-  }, {});
-  const hasRetainedInIncision =
-    scanPhase === 'post' &&
-    incisionCount > 0;
-  const allItemsAccountedFor =
-    baselineCounts &&
-    postCounts &&
-    !hasDiscrepancy &&
-    !hasRetainedInIncision;
-
-  useEffect(() => {
-    if (postScanVersion <= 0) {
-      return;
-    }
-    if (scanPhase !== 'post') {
-      return;
-    }
-    const incisionItemsNow = trackedItems.filter(i => i.zone === 'incision');
-    setShowIncisionPopup(incisionItemsNow.length > 0);
-  }, [postScanVersion, scanPhase]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-140px)] gap-4">
@@ -328,8 +347,40 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
       )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
         <div className="lg:col-span-2 flex flex-col gap-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => onVideoModeChange('camera')}
+              className={`px-3 py-1 rounded-full text-sm border ${
+                videoMode === 'camera'
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-700 border-gray-300'
+              }`}
+            >
+              Live camera
+            </button>
+            <label className="px-3 py-1 rounded-full text-sm border bg-white text-gray-700 border-gray-300 cursor-pointer">
+              Upload video
+              <input
+                type="file"
+                accept="video/*"
+                onChange={handleVideoFileChange}
+                className="hidden"
+              />
+            </label>
+            {videoMode === 'file' && videoFileUrl && (
+              <span className="text-xs text-gray-500">
+                Using uploaded video
+              </span>
+            )}
+          </div>
+
           <div className="bg-black rounded-lg overflow-hidden shadow-lg relative">
-           <CameraPreview forwardedRef={videoRef} externalStream={externalStream} />
+           <CameraPreview
+             forwardedRef={videoRef}
+             externalStream={externalStream}
+             videoFileUrl={videoFileUrl}
+             videoMode={videoMode}
+           />
            
            {/* Overlay for tracked items */}
            <div className="absolute inset-0 pointer-events-none">
@@ -384,29 +435,34 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
               );
             })}
              
-             {/* Zone Outlines */}
-             {zones && (
-                <>
-                  <div 
-                    className="absolute border-2 border-green-500/30 bg-green-500/10 pointer-events-none"
-                    style={{
-                        left: zones.tray.x1 * displaySize.width,
-                        top: zones.tray.y1 * displaySize.height,
-                        width: (zones.tray.x2 - zones.tray.x1) * displaySize.width,
-                        height: (zones.tray.y2 - zones.tray.y1) * displaySize.height
-                    }}
-                  />
-                  <div 
-                    className="absolute border-2 border-red-500/30 bg-red-500/10 pointer-events-none"
-                    style={{
-                        left: zones.incision.x1 * displaySize.width,
-                        top: zones.incision.y1 * displaySize.height,
-                        width: (zones.incision.x2 - zones.incision.x1) * displaySize.width,
-                        height: (zones.incision.y2 - zones.incision.y1) * displaySize.height
-                    }}
-                  />
-                </>
-             )}
+             {(() => {
+               const zonesToRender = dynamicZones || zones;
+               if (!zonesToRender || !zonesToRender.tray || !zonesToRender.incision) {
+                 return null;
+               }
+               return (
+                 <>
+                   <div 
+                     className="absolute border-2 border-green-500/30 bg-green-500/10 pointer-events-none"
+                     style={{
+                         left: zonesToRender.tray.x1 * displaySize.width,
+                         top: zonesToRender.tray.y1 * displaySize.height,
+                         width: (zonesToRender.tray.x2 - zonesToRender.tray.x1) * displaySize.width,
+                         height: (zonesToRender.tray.y2 - zonesToRender.tray.y1) * displaySize.height
+                     }}
+                   />
+                   <div 
+                     className="absolute border-2 border-red-500/30 bg-red-500/10 pointer-events-none"
+                     style={{
+                         left: zonesToRender.incision.x1 * displaySize.width,
+                         top: zonesToRender.incision.y1 * displaySize.height,
+                         width: (zonesToRender.incision.x2 - zonesToRender.incision.x1) * displaySize.width,
+                         height: (zonesToRender.incision.y2 - zonesToRender.incision.y1) * displaySize.height
+                     }}
+                   />
+                 </>
+               );
+             })()}
            </div>
            
            <div className="absolute top-4 right-4 bg-black/60 text-white px-3 py-1 rounded-full text-sm flex items-center gap-2">
@@ -434,6 +490,11 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
               <div className="text-sm text-gray-600">
                 Baseline saved
               </div>
+            )}
+            {videoMode === 'file' && snapshotMode && (
+              <span className="text-xs text-gray-500">
+                Overshoot running on snapshots for uploaded video
+              </span>
             )}
           </div>
 
@@ -514,15 +575,21 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
 };
 
 // Simple internal component to just show the user's face/environment so they can see what they are doing
-const CameraPreview = ({ forwardedRef, externalStream }) => {
+const CameraPreview = ({ forwardedRef, externalStream, videoFileUrl, videoMode }) => {
   useEffect(() => {
     let stream = null;
-    
-    if (externalStream) {
-      if (forwardedRef.current) {
-        forwardedRef.current.srcObject = externalStream;
-      }
-      return;
+    const video = forwardedRef.current;
+
+    if (videoMode === 'file' && videoFileUrl && video) {
+      video.srcObject = null;
+      video.src = videoFileUrl;
+      video.play().catch(() => {});
+      return () => {};
+    }
+
+    if (externalStream && video) {
+      video.srcObject = externalStream;
+      return () => {};
     }
 
     const startCamera = async () => {
@@ -545,7 +612,7 @@ const CameraPreview = ({ forwardedRef, externalStream }) => {
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [forwardedRef, externalStream]);
+  }, [forwardedRef, externalStream, videoFileUrl, videoMode]);
 
   return (
     <video 
@@ -557,6 +624,90 @@ const CameraPreview = ({ forwardedRef, externalStream }) => {
     />
   );
 };
+
+function trackZonesWithTemplate(videoElement, currentZones, templatesRef) {
+  const cv = window.cv;
+  if (!cv || !videoElement || !currentZones) {
+    return currentZones;
+  }
+  const frameData = captureFrameFromVideo(videoElement);
+  const canvas = frameData.canvas;
+  const src = cv.imread(canvas);
+  const gray = new cv.Mat();
+  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+  const updated = { ...currentZones };
+  const names = ['tray', 'incision'];
+
+  names.forEach(name => {
+    const zone = currentZones[name];
+    if (!zone) {
+      return;
+    }
+    const cols = gray.cols;
+    const rows = gray.rows;
+    const x = Math.max(0, Math.min(cols - 1, Math.round(zone.x1 * cols)));
+    const y = Math.max(0, Math.min(rows - 1, Math.round(zone.y1 * rows)));
+    const w = Math.max(10, Math.round((zone.x2 - zone.x1) * cols));
+    const h = Math.max(10, Math.round((zone.y2 - zone.y1) * rows));
+    const width = Math.min(w, cols - x);
+    const height = Math.min(h, rows - y);
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+
+    let template = templatesRef.current[name];
+    if (!template) {
+      const roi = gray.roi(new cv.Rect(x, y, width, height));
+      const clone = roi.clone();
+      roi.delete();
+      templatesRef.current[name] = clone;
+      updated[name] = zone;
+      return;
+    }
+
+    const resultCols = gray.cols - template.cols + 1;
+    const resultRows = gray.rows - template.rows + 1;
+    if (resultCols <= 0 || resultRows <= 0) {
+      return;
+    }
+
+    const result = new cv.Mat();
+    result.create(resultRows, resultCols, cv.CV_32FC1);
+    cv.matchTemplate(gray, template, result, cv.TM_CCOEFF_NORMED);
+    const mm = cv.minMaxLoc(result);
+    const maxLoc = mm.maxLoc;
+    const maxVal = mm.maxVal;
+    result.delete();
+
+    if (typeof maxVal !== 'number' || maxVal < 0.5) {
+      return;
+    }
+
+    const nx1 = maxLoc.x / gray.cols;
+    const ny1 = maxLoc.y / gray.rows;
+    const nx2 = (maxLoc.x + template.cols) / gray.cols;
+    const ny2 = (maxLoc.y + template.rows) / gray.rows;
+
+    updated[name] = {
+      x1: Math.max(0, Math.min(1, nx1)),
+      y1: Math.max(0, Math.min(1, ny1)),
+      x2: Math.max(0, Math.min(1, nx2)),
+      y2: Math.max(0, Math.min(1, ny2))
+    };
+
+    const newRoi = gray.roi(new cv.Rect(maxLoc.x, maxLoc.y, template.cols, template.rows));
+    const newTemplate = newRoi.clone();
+    newRoi.delete();
+    template.delete();
+    templatesRef.current[name] = newTemplate;
+  });
+
+  gray.delete();
+  src.delete();
+
+  return updated;
+}
 
 function captureFrameFromVideo(videoElement) {
   const canvas = document.createElement('canvas');
@@ -629,13 +780,46 @@ async function runRoboflowDetection(base64Image) {
 }
 
 function buildCountsFromRoboflow(result) {
-  const predictionsArray =
+  let predictionsArray = [];
+  if (
     result &&
     result.outputs &&
     result.outputs.predictions &&
     Array.isArray(result.outputs.predictions.predictions)
-      ? result.outputs.predictions.predictions
-      : [];
+  ) {
+    predictionsArray = result.outputs.predictions.predictions;
+  } else if (
+    result &&
+    result.outputs &&
+    Array.isArray(result.outputs)
+  ) {
+    predictionsArray = result.outputs.flatMap(block => {
+      if (!block) {
+        return [];
+      }
+      if (Array.isArray(block.predictions)) {
+        return block.predictions;
+      }
+      if (block.image && Array.isArray(block.image.predictions)) {
+        return block.image.predictions;
+      }
+      const nestedSources = Object.values(block).flatMap(value => {
+        if (!value) {
+          return [];
+        }
+        if (Array.isArray(value.predictions)) {
+          return value.predictions;
+        }
+        if (value.image && Array.isArray(value.image.predictions)) {
+          return value.image.predictions;
+        }
+        return [];
+      });
+      return nestedSources;
+    });
+  } else if (result && Array.isArray(result.predictions)) {
+    predictionsArray = result.predictions;
+  }
   const predictions = predictionsArray.map((p, idx) => ({
     id: p.id || idx,
     class: p.class || p.name || 'unknown',

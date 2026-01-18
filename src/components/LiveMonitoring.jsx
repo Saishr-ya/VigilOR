@@ -959,7 +959,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={() => handleScan('baseline')}
               disabled={scanLoading}
@@ -973,6 +973,25 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               className="px-4 py-2 rounded-lg bg-indigo-500 text-slate-950 hover:bg-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium shadow"
             >
               {scanPhase === 'post' && scanLoading ? 'Capturing post-surgery...' : 'Capture Post-Surgery Scan'}
+            </button>
+            <button
+              onClick={() => {
+                if (incisionCount > 0) {
+                  alert("WARNING: ITEMS STILL IN PATIENT! CANNOT CLOSE.");
+                } else {
+                  const confirmClose = window.confirm("Confirm patient closure?");
+                  if (confirmClose) {
+                    onClosePatient();
+                  }
+                }
+              }}
+              className={`px-4 py-2 rounded-lg font-medium text-sm shadow ${
+                incisionCount > 0 
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse' 
+                  : 'bg-sky-500 hover:bg-sky-400 text-slate-950'
+              }`}
+            >
+              {incisionCount > 0 ? `WARNING: ${incisionCount} ITEMS IN PATIENT` : 'Close Patient'}
             </button>
             {baselineCounts && (
               <div className="text-xs text-slate-400">

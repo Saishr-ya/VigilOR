@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 
-const MATCH_THRESHOLD = 0.08;
-const MERGE_THRESHOLD = 0.08;
+const MATCH_THRESHOLD = 0.12;
+const MERGE_THRESHOLD = 0.12;
 const ZONE_STABLE_FRAMES = 1;
 const ITEM_STALE_MS = 1000;
 
@@ -32,7 +32,7 @@ export const useItemTracking = (analysisResult) => {
           Math.pow(other.x - detection.x, 2) +
           Math.pow(other.y - detection.y, 2)
         );
-        return dist < 0.08;
+        return dist < MERGE_THRESHOLD;
       });
     });
     

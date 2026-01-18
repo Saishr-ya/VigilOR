@@ -218,16 +218,15 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
     };
 
     const prompt = [
-      "Identify all clearly visible objects (surgical instruments, bottles, phones, etc).",
+      "Identify ALL inanimate objects visible on the surface (surgical instruments, medical supplies, sponges, bottles, phones, etc).",
+      "Do NOT include hands, fingers, arms, gloves, people, or any body parts as items.",
+      "Return the center coordinates (x,y) for every single remaining item you see, regardless of where it is.",
       "For each object, return:",
-      "- type: short label (e.g. bottle, sponge, scissors)",
+      "- type: short label",
       "- x: center x pixel",
       "- y: center y pixel",
       "",
-      `Tray bounds: x1=${tray.x1}, x2=${tray.x2}, y1=${tray.y1}, y2=${tray.y2}.`,
-      `Incision bounds: x1=${incision.x1}, x2=${incision.x2}, y1=${incision.y1}, y2=${incision.y2}.`,
-      "",
-      "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number, \"zone\": \"tray\" | \"incision\" | null}] }"
+      "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number}] }"
     ].join(" ");
 
     setSnapshotMode(false);
@@ -253,8 +252,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               properties: {
                 type: { type: 'string' },
                 x: { type: 'number' },
-                y: { type: 'number' },
-                zone: { type: 'string', enum: ['tray', 'incision', null] }
+                y: { type: 'number' }
               }
             }
           },
@@ -305,7 +303,22 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
 
           console.log("[LiveMonitoring] Vision Result:", parsed);
 
-          const normalizedItems = (parsed.items || []).map(item => {
+          const normalizedItems = (parsed.items || [])
+            .filter(item => {
+              const label = (item.type || "").toString().toLowerCase();
+              if (!label) return true;
+              return !(
+                label.includes("hand") ||
+                label.includes("finger") ||
+                label.includes("palm") ||
+                label.includes("wrist") ||
+                label.includes("arm") ||
+                label.includes("glove") ||
+                label.includes("person") ||
+                label.includes("human")
+              );
+            })
+            .map(item => {
             const currentVideo = videoRef.current;
             const w = currentVideo ? currentVideo.videoWidth : 1280;
             const h = currentVideo ? currentVideo.videoHeight : 720;
@@ -322,10 +335,10 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               yNorm = h ? y / h : 0;
             }
 
-            const trayMarginX = 0.02;
-            const trayMarginY = 0.02;
-            const incisionMarginX = 0.02;
-            const incisionMarginY = 0.02;
+        const trayMarginX = 0;
+        const trayMarginY = 0;
+        const incisionMarginX = 0;
+        const incisionMarginY = 0;
 
             let zone = null;
 
@@ -433,7 +446,22 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
       let trayZoneCount = 0;
       let incisionZoneCount = 0;
 
-      const itemsFromRoboflow = predictions.map(pred => {
+      const itemsFromRoboflow = predictions
+        .filter(pred => {
+          const label = (pred.class || pred.name || "").toString().toLowerCase();
+          if (!label) return true;
+          return !(
+            label.includes("hand") ||
+            label.includes("finger") ||
+            label.includes("palm") ||
+            label.includes("wrist") ||
+            label.includes("arm") ||
+            label.includes("glove") ||
+            label.includes("person") ||
+            label.includes("human")
+          );
+        })
+        .map(pred => {
         const xCenter = typeof pred.x === 'number' ? pred.x : 0;
         const yCenter = typeof pred.y === 'number' ? pred.y : 0;
         const xNorm = width ? xCenter / width : 0;
@@ -441,10 +469,10 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
 
         let zone = null;
         if (zonesForClassification && zonesForClassification.tray && zonesForClassification.incision) {
-          const trayMarginX = 0.02;
-          const trayMarginY = 0.02;
-          const incisionMarginX = 0.05;
-          const incisionMarginY = 0.05;
+          const trayMarginX = 0;
+          const trayMarginY = 0;
+          const incisionMarginX = 0;
+          const incisionMarginY = 0;
 
           const trayX1 = Math.max(0, zonesForClassification.tray.x1 - trayMarginX);
           const trayX2 = Math.min(1, zonesForClassification.tray.x2 + trayMarginX);
@@ -576,7 +604,22 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
         let trayZoneCount = 0;
         let incisionZoneCount = 0;
 
-        const itemsFromRoboflow = predictions.map(pred => {
+        const itemsFromRoboflow = predictions
+          .filter(pred => {
+            const label = (pred.class || pred.name || "").toString().toLowerCase();
+            if (!label) return true;
+            return !(
+              label.includes("hand") ||
+              label.includes("finger") ||
+              label.includes("palm") ||
+              label.includes("wrist") ||
+              label.includes("arm") ||
+              label.includes("glove") ||
+              label.includes("person") ||
+              label.includes("human")
+            );
+          })
+          .map(pred => {
           const xCenter = typeof pred.x === 'number' ? pred.x : 0;
           const yCenter = typeof pred.y === 'number' ? pred.y : 0;
           const xNorm = width ? xCenter / width : 0;
@@ -584,10 +627,10 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
 
           let zone = null;
           if (zonesForClassification && zonesForClassification.tray && zonesForClassification.incision) {
-            const trayMarginX = 0.02;
-            const trayMarginY = 0.02;
-            const incisionMarginX = 0.05;
-            const incisionMarginY = 0.05;
+            const trayMarginX = 0;
+            const trayMarginY = 0;
+            const incisionMarginX = 0;
+            const incisionMarginY = 0;
 
             const trayX1 = Math.max(0, zonesForClassification.tray.x1 - trayMarginX);
             const trayX2 = Math.min(1, zonesForClassification.tray.x2 + trayMarginX);
@@ -711,7 +754,22 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
         let trayZoneCount = 0;
         let incisionZoneCount = 0;
 
-        const itemsFromRoboflow = predictions.map(pred => {
+        const itemsFromRoboflow = predictions
+          .filter(pred => {
+            const label = (pred.class || pred.name || "").toString().toLowerCase();
+            if (!label) return true;
+            return !(
+              label.includes("hand") ||
+              label.includes("finger") ||
+              label.includes("palm") ||
+              label.includes("wrist") ||
+              label.includes("arm") ||
+              label.includes("glove") ||
+              label.includes("person") ||
+              label.includes("human")
+            );
+          })
+          .map(pred => {
           const xCenter = typeof pred.x === 'number' ? pred.x : 0;
           const yCenter = typeof pred.y === 'number' ? pred.y : 0;
           const xNorm = width ? xCenter / width : 0;
@@ -719,10 +777,10 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
 
           let zone = null;
           if (zonesForClassification && zonesForClassification.tray && zonesForClassification.incision) {
-            const trayMarginX = 0.02;
-            const trayMarginY = 0.02;
-            const incisionMarginX = 0.05;
-            const incisionMarginY = 0.05;
+            const trayMarginX = 0;
+            const trayMarginY = 0;
+            const incisionMarginX = 0;
+            const incisionMarginY = 0;
 
             const trayX1 = Math.max(0, zonesForClassification.tray.x1 - trayMarginX);
             const trayX2 = Math.min(1, zonesForClassification.tray.x2 + trayMarginX);
@@ -783,27 +841,11 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
     discrepancy.missing &&
     discrepancy.missing.length > 0;
 
-  const baselineTotal =
-    baselineTrayCount != null && baselineIncisionCount != null
-      ? baselineTrayCount + baselineIncisionCount
-      : null;
-
-  const hasValidBaseline = baselineTotal != null && baselineTotal > 0;
-
   const stableTrayCountFromTracking = trackedItems.filter(item => item.zone === 'tray').length;
   const stableIncisionCountFromTracking = trackedItems.filter(item => item.zone === 'incision').length;
 
-  const effectiveIncisionCount =
-    hasValidBaseline
-      ? Math.min(baselineTotal, stableIncisionCountFromTracking)
-      : stableIncisionCountFromTracking;
-
-  const effectiveTrayCount =
-    hasValidBaseline
-      ? Math.max(0, baselineTotal - effectiveIncisionCount)
-      : stableTrayCountFromTracking;
-
-  const incisionCount = effectiveIncisionCount;
+  const effectiveTrayCount = stableTrayCountFromTracking;
+  const incisionCount = stableIncisionCountFromTracking;
   const incisionItems = trackedItems.filter(item => item.zone === 'incision');
   const incisionSummaryByType = incisionItems.reduce((acc, item) => {
     if (!item.type) {
@@ -988,6 +1030,35 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               const baseHeight = currentVideo ? (currentVideo.videoHeight || currentVideo.clientHeight || 480) : 480;
               const scaleX = baseWidth ? displaySize.width / baseWidth : 1;
               const scaleY = baseHeight ? displaySize.height / baseHeight : 1;
+
+              const xCenter = typeof pred.x === 'number' ? pred.x : 0;
+              const yCenter = typeof pred.y === 'number' ? pred.y : 0;
+              const xNorm = baseWidth ? xCenter / baseWidth : 0;
+              const yNorm = baseHeight ? yCenter / baseHeight : 0;
+
+              if (!zones || !zones.tray || !zones.incision) {
+                return null;
+              }
+
+              const trayX1 = Math.max(0, zones.tray.x1);
+              const trayX2 = Math.min(1, zones.tray.x2);
+              const trayY1 = Math.max(0, zones.tray.y1);
+              const trayY2 = Math.min(1, zones.tray.y2);
+
+              const incisionX1 = Math.max(0, zones.incision.x1);
+              const incisionX2 = Math.min(1, zones.incision.x2);
+              const incisionY1 = Math.max(0, zones.incision.y1);
+              const incisionY2 = Math.min(1, zones.incision.y2);
+
+              const inTray = xNorm >= trayX1 && xNorm <= trayX2 &&
+                             yNorm >= trayY1 && yNorm <= trayY2;
+              const inIncision = xNorm >= incisionX1 && xNorm <= incisionX2 &&
+                                 yNorm >= incisionY1 && yNorm <= incisionY2;
+
+              if (!inTray && !inIncision) {
+                return null;
+              }
+
               const left = (pred.x - pred.width / 2) * scaleX;
               const top = (pred.y - pred.height / 2) * scaleY;
               const width = pred.width * scaleX;

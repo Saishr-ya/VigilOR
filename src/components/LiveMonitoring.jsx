@@ -238,11 +238,23 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
             if (!trimmed) {
               return;
             }
-            if (!((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')))) {
-              return;
+
+            let jsonText = null;
+            if (
+              (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+              (trimmed.startsWith('[') && trimmed.endsWith(']'))
+            ) {
+              jsonText = trimmed;
+            } else {
+              const match = trimmed.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+              if (!match) {
+                return;
+              }
+              jsonText = match[1];
             }
+
             try {
-              parsed = JSON.parse(trimmed);
+              parsed = JSON.parse(jsonText);
             } catch (e) {
               console.warn("[LiveMonitoring] Skipping non-JSON chunk from Overshoot", e);
               return;
@@ -270,20 +282,14 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               yNorm = h ? y / h : 0;
             }
 
-            const trayMarginX = 0.0;
-            const trayMarginY = 0.0;
-            const incisionMarginX = 0.0;
-            const incisionMarginY = 0.0;
+            const trayMarginX = 0.02;
+            const trayMarginY = 0.02;
+            const incisionMarginX = 0.02;
+            const incisionMarginY = 0.02;
 
             let zone = null;
 
-            if (typeof item.zone === 'string') {
-              if (item.zone === 'tray' || item.zone === 'incision') {
-                zone = item.zone;
-              }
-            }
-
-            if (!zone && zones && zones.tray && zones.incision) {
+            if (zones && zones.tray && zones.incision) {
               const trayX1 = Math.max(0, zones.tray.x1 - trayMarginX);
               const trayX2 = Math.min(1, zones.tray.x2 + trayMarginX);
               const trayY1 = Math.max(0, zones.tray.y1 - trayMarginY);

@@ -19,6 +19,8 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
   const [scanLoading, setScanLoading] = useState(false);
   const [scanError, setScanError] = useState(null);
   const [discrepancy, setDiscrepancy] = useState(null);
+  const [postScanVersion, setPostScanVersion] = useState(0);
+  const [showIncisionPopup, setShowIncisionPopup] = useState(false);
   const [rfPredictions, setRfPredictions] = useState([]);
 
   // Update display size when video resizes
@@ -227,14 +229,19 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
       const rfResult = await runRoboflowDetection(enhancedBase64);
       const { counts, predictions } = buildCountsFromRoboflow(rfResult);
       setRfPredictions(predictions);
+      const scanCounts = trackedItems.reduce((acc, item) => {
+        const label = item.type || 'unknown';
+        acc[label] = (acc[label] || 0) + 1;
+        return acc;
+      }, {});
       if (phase === 'baseline') {
-        setBaselineCounts(counts);
+        setBaselineCounts(scanCounts);
         setPostCounts(null);
         setDiscrepancy(null);
       } else {
-        setPostCounts(counts);
+        setPostCounts(scanCounts);
         if (baselineCounts) {
-          const diff = compareCounts(baselineCounts, counts);
+          const diff = compareCounts(baselineCounts, scanCounts);
           setDiscrepancy(diff);
         } else {
           setDiscrepancy(null);
@@ -245,6 +252,9 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
       setScanError(err.message || String(err));
     } finally {
       setScanLoading(false);
+      if (phase === 'post') {
+        setPostScanVersion(v => v + 1);
+      }
     }
   };
 
@@ -257,8 +267,63 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
   const roboPostTotal = postCounts ? Object.values(postCounts).reduce((sum, v) => sum + v, 0) : null;
   const overshootTotal = overshootCounts ? Object.values(overshootCounts).reduce((sum, v) => sum + v, 0) : null;
 
+  const incisionItems = trackedItems.filter(i => i.zone === 'incision');
+  const incisionCount = incisionItems.length;
+  const incisionSummaryByType = incisionItems.reduce((acc, item) => {
+    if (!item.type) {
+      return acc;
+    }
+    acc[item.type] = (acc[item.type] || 0) + 1;
+    return acc;
+  }, {});
+  const hasRetainedInIncision =
+    scanPhase === 'post' &&
+    incisionCount > 0;
+  const allItemsAccountedFor =
+    baselineCounts &&
+    postCounts &&
+    !hasDiscrepancy &&
+    !hasRetainedInIncision;
+
+  useEffect(() => {
+    if (postScanVersion <= 0) {
+      return;
+    }
+    if (scanPhase !== 'post') {
+      return;
+    }
+    const incisionItemsNow = trackedItems.filter(i => i.zone === 'incision');
+    setShowIncisionPopup(incisionItemsNow.length > 0);
+  }, [postScanVersion]);
+
   return (
     <div className="flex flex-col h-[calc(100vh-140px)] gap-4">
+      {showIncisionPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-lg p-4 max-w-sm w-full">
+            <div className="font-semibold text-red-700 mb-2">
+              Items still in incision zone
+            </div>
+            <div className="text-sm text-gray-800 mb-3">
+              {incisionCount > 0 ? (
+                Object.entries(incisionSummaryByType).map(([type, count]) => (
+                  <div key={type}>
+                    {count} {type}
+                  </div>
+                ))
+              ) : (
+                <div>Items remain in the incision zone.</div>
+              )}
+            </div>
+            <button
+              onClick={() => setShowIncisionPopup(false)}
+              className="px-4 py-2 rounded bg-red-600 text-white text-sm hover:bg-red-700"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
         <div className="lg:col-span-2 flex flex-col gap-6">
           <div className="bg-black rounded-lg overflow-hidden shadow-lg relative">
@@ -373,38 +438,58 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
           )}
 
           {baselineCounts && postCounts && (
-            <div
-              className={`mt-4 text-sm rounded px-3 py-2 border ${
-                hasDiscrepancy
-                  ? 'bg-red-50 border-red-200 text-red-800'
-                  : 'bg-green-50 border-green-200 text-green-800'
-              }`}
-            >
-              <div className="font-semibold mb-1">
-                {hasDiscrepancy ? 'Count mismatch detected' : 'All items accounted for'}
+            <>
+              <div
+                className={`mt-4 text-sm rounded px-3 py-2 border ${
+                  allItemsAccountedFor
+                    ? 'bg-green-50 border-green-200 text-green-800'
+                    : 'bg-red-50 border-red-200 text-red-800'
+                }`}
+              >
+                <div className="font-semibold mb-1">
+                  {hasRetainedInIncision
+                    ? 'Items still in incision zone'
+                    : hasDiscrepancy
+                      ? 'Count mismatch detected'
+                      : 'All items accounted for'}
+                </div>
+                <div className="mb-1">
+                  Baseline total:{' '}
+                  {Object.values(baselineCounts).reduce((sum, v) => sum + v, 0)}; Post-surgery total:{' '}
+                  {Object.values(postCounts).reduce((sum, v) => sum + v, 0)}
+                </div>
+                {hasDiscrepancy && (
+                  <div className="space-y-1">
+                    {discrepancy.missing &&
+                      discrepancy.missing.map(item => (
+                        <div key={`missing-${item.type}`}>
+                          {item.count} {item.type} missing
+                        </div>
+                      ))}
+                    {discrepancy.extra &&
+                      discrepancy.extra.map(item => (
+                        <div key={`extra-${item.type}`}>
+                          {item.count} extra {item.type}
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
-              <div className="mb-1">
-                Baseline total:{' '}
-                {Object.values(baselineCounts).reduce((sum, v) => sum + v, 0)}; Post-surgery total:{' '}
-                {Object.values(postCounts).reduce((sum, v) => sum + v, 0)}
-              </div>
-              {hasDiscrepancy && (
-                <div className="space-y-1">
-                  {discrepancy.missing &&
-                    discrepancy.missing.map(item => (
-                      <div key={`missing-${item.type}`}>
-                        {item.count} {item.type} missing
+              {hasRetainedInIncision && (
+                <div className="mt-3 text-sm rounded px-3 py-2 border bg-red-50 border-red-200 text-red-800">
+                  <div className="font-semibold mb-1">
+                    {incisionCount} item{incisionCount > 1 ? 's' : ''} still in incision zone
+                  </div>
+                  <div className="space-y-1">
+                    {Object.entries(incisionSummaryByType).map(([type, count]) => (
+                      <div key={type}>
+                        {count} {type}
                       </div>
                     ))}
-                  {discrepancy.extra &&
-                    discrepancy.extra.map(item => (
-                      <div key={`extra-${item.type}`}>
-                        {item.count} extra {item.type}
-                      </div>
-                    ))}
+                  </div>
                 </div>
               )}
-            </div>
+            </>
           )}
           
           <Tally items={{ tray: trackedItems.filter(i => i.zone === 'tray'), incision: trackedItems.filter(i => i.zone === 'incision') }} />

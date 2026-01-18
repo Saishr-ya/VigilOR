@@ -112,17 +112,24 @@ export const useItemTracking = (analysisResult) => {
           }
 
           if (pendingCount >= ZONE_STABLE_FRAMES && nextZone !== stableZone) {
-            const eventType = nextZone === 'incision' ? 'entry' : 'exit';
-            const newEvent = {
-              id: Date.now() + Math.random(),
-              timestamp: Date.now(),
-              type: eventType,
-              itemType: item.type,
-              from: stableZone,
-              to: nextZone
-            };
-            setEvents(prev => [newEvent, ...prev]);
-            console.log("[useItemTracking] Zone change", newEvent);
+            // Determine effective source zone (handling null transitions)
+            const effectiveFrom = stableZone || item.lastNonNullZone;
+            
+            // Only log if we are entering a valid zone (tray or incision)
+            // and coming from a different valid zone (or effective one)
+            if (nextZone && effectiveFrom && nextZone !== effectiveFrom) {
+                const eventType = nextZone === 'incision' ? 'entry' : 'exit';
+                const newEvent = {
+                  id: Date.now() + Math.random(),
+                  timestamp: Date.now(),
+                  type: eventType,
+                  itemType: item.type,
+                  from: effectiveFrom,
+                  to: nextZone
+                };
+                setEvents(prev => [newEvent, ...prev]);
+                console.log("[useItemTracking] Zone change", newEvent);
+            }
 
             const key = item.type + ":" + item.id;
             if (nextZone === "incision" && !inPatientRef.current.has(key)) {
@@ -140,6 +147,9 @@ export const useItemTracking = (analysisResult) => {
           }
         }
 
+        // Update lastNonNullZone if we have a valid stable zone
+        const lastNonNullZone = stableZone || item.lastNonNullZone;
+
         currentItems[bestMatchIndex] = {
           ...item,
           x: detection.x,
@@ -148,7 +158,8 @@ export const useItemTracking = (analysisResult) => {
           stableZone,
           pendingZone,
           pendingCount,
-          lastSeen: timestamp
+          lastSeen: timestamp,
+          lastNonNullZone
         };
       } else {
         const initialZone = detection.zone;
@@ -162,7 +173,8 @@ export const useItemTracking = (analysisResult) => {
           pendingZone: initialZone,
           pendingCount: 0,
           lastSeen: timestamp,
-          firstSeen: timestamp
+          firstSeen: timestamp,
+          lastNonNullZone: initialZone
         };
 
         currentItems.push(newItem);

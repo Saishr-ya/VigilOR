@@ -29,6 +29,8 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   const [dynamicZones, setDynamicZones] = useState(zones);
   const dynamicZonesRef = useRef(zones);
   const [baselineObjectHints, setBaselineObjectHints] = useState(null);
+  const [baselineTrayCount, setBaselineTrayCount] = useState(null);
+  const [baselineIncisionCount, setBaselineIncisionCount] = useState(null);
   const zoneTemplatesRef = useRef({ tray: null, incision: null });
   const trackedItemsRef = useRef([]);
   const [trackingActive, setTrackingActive] = useState(false);
@@ -121,6 +123,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   }, [trackedItems]);
 
   useEffect(() => {
+<<<<<<< HEAD
     if (videoMode !== 'camera') {
       setOsdTime('');
       return;
@@ -140,6 +143,8 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   }, [videoMode]);
 
   useEffect(() => {
+=======
+>>>>>>> refs/remotes/origin/main
     const apiKey = import.meta.env.VITE_OVERSHOOT_API_KEY;
     const baseUrl = import.meta.env.VITE_OVERSHOOT_BASE_URL || "https://cluster1.overshoot.ai/api/v0.2";
 
@@ -428,7 +433,16 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
         incision_count: incisionZoneCount
       });
 
-      const scanCounts = counts || {};
+      const scanCounts = itemsFromRoboflow.reduce((acc, item) => {
+        if (!item.zone) {
+          return acc;
+        }
+        if (!item.type) {
+          return acc;
+        }
+        acc[item.type] = (acc[item.type] || 0) + 1;
+        return acc;
+      }, {});
 
       if (phase === 'baseline') {
         setBaselineCounts(scanCounts);
@@ -450,7 +464,14 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
     } finally {
       setScanLoading(false);
       const video = videoRef.current;
-      if (video && video.paused) {
+      if (!video) {
+        return;
+      }
+      if (videoMode === 'file') {
+        if (phase === 'baseline' && video.paused && !video.ended) {
+          video.play().catch(() => {});
+        }
+      } else if (video.paused) {
         video.play().catch(() => {});
       }
     }
@@ -701,7 +722,29 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   const roboPostTotal = postCounts ? Object.values(postCounts).reduce((sum, v) => sum + v, 0) : null;
   const overshootTotal = overshootCounts ? Object.values(overshootCounts).reduce((sum, v) => sum + v, 0) : null;
 
-  const incisionCount = counts.incision || 0;
+  const baselineTotal =
+    baselineTrayCount != null && baselineIncisionCount != null
+      ? baselineTrayCount + baselineIncisionCount
+      : null;
+
+  const liveIncisionFromTracking = trackedItems.filter(item => item.zone === 'incision').length;
+  const liveIncisionFromAnalysis =
+    analysisResult && typeof analysisResult.incision_count === 'number'
+      ? analysisResult.incision_count
+      : 0;
+  const liveIncisionCount = Math.max(liveIncisionFromTracking, liveIncisionFromAnalysis);
+
+  const effectiveIncisionCount =
+    baselineTotal != null ? Math.min(baselineTotal, liveIncisionCount) : (counts.incision || liveIncisionCount || 0);
+
+  const effectiveTrayCount =
+    baselineTotal != null
+      ? Math.max(0, baselineTotal - effectiveIncisionCount)
+      : (counts.tray || (analysisResult && typeof analysisResult.tray_count === 'number'
+          ? analysisResult.tray_count
+          : 0));
+
+  const incisionCount = effectiveIncisionCount;
   const incisionItems = trackedItems.filter(item => item.zone === 'incision');
   const incisionSummaryByType = incisionItems.reduce((acc, item) => {
     if (!item.type) {
@@ -715,9 +758,15 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   return (
     <div className="flex flex-col h-[calc(100vh-140px)] gap-4 text-slate-100">
       {showIncisionPopup && (
+<<<<<<< HEAD
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70">
           <div className="bg-slate-900 border border-rose-500/50 rounded-xl shadow-xl p-4 max-w-sm w-full">
             <div className="font-semibold text-rose-200 mb-2 text-sm">
+=======
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-lg p-4 max-w-sm w-full">
+            <div className="font-semibold text-red-700 mb-2">
+>>>>>>> refs/remotes/origin/main
               Items still in incision zone
             </div>
             <div className="text-xs text-slate-200 mb-3 space-y-1">
@@ -747,15 +796,26 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={() => onVideoModeChange('camera')}
+<<<<<<< HEAD
               className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                 videoMode === 'camera'
                   ? 'bg-sky-500 text-slate-950 border-sky-400 shadow'
                   : 'bg-slate-900 text-slate-100 border-slate-700 hover:border-sky-400/60'
+=======
+              className={`px-3 py-1 rounded-full text-sm border ${
+                videoMode === 'camera'
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-700 border-gray-300'
+>>>>>>> refs/remotes/origin/main
               }`}
             >
               Live camera
             </button>
+<<<<<<< HEAD
             <label className="px-3 py-1 rounded-full text-xs font-medium border bg-slate-900 text-slate-100 border-slate-700 hover:border-sky-400/60 cursor-pointer transition-colors">
+=======
+            <label className="px-3 py-1 rounded-full text-sm border bg-white text-gray-700 border-gray-300 cursor-pointer">
+>>>>>>> refs/remotes/origin/main
               Upload video
               <input
                 type="file"
@@ -765,11 +825,16 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               />
             </label>
             {videoMode === 'file' && videoFileUrl && (
+<<<<<<< HEAD
               <span className="text-[11px] text-slate-400">
+=======
+              <span className="text-xs text-gray-500">
+>>>>>>> refs/remotes/origin/main
                 Using uploaded video
               </span>
             )}
           </div>
+<<<<<<< HEAD
 
           <div className="bg-slate-900 rounded-2xl overflow-hidden shadow-lg border border-slate-800 relative">
             <div className="relative bg-black/90">
@@ -837,6 +902,38 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
                </div>
              ))}
 
+=======
+
+          <div className="bg-black rounded-lg overflow-hidden shadow-lg relative">
+           <CameraPreview
+             forwardedRef={videoRef}
+             externalStream={externalStream}
+             videoFileUrl={videoFileUrl}
+             videoMode={videoMode}
+           />
+           
+           {/* Overlay for tracked items */}
+           <div className="absolute inset-0 pointer-events-none">
+             {trackedItems.filter(item => item.zone === 'tray' || item.zone === 'incision').map((item) => (
+               <div 
+                 key={item.id}
+                 className={`absolute w-6 h-6 rounded-full border-2 border-white shadow-sm transition-all duration-300 ${
+                   item.zone === 'incision' ? 'bg-red-500' : 'bg-green-500'
+                 }`}
+                 style={{ 
+                   left: item.x * displaySize.width, 
+                   top: item.y * displaySize.height, 
+                   transform: 'translate(-50%, -50%)',
+                   opacity: (Date.now() - item.lastSeen) > 300 ? 0.5 : 1
+                 }}
+               >
+                 <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+                   {item.type}
+                 </span>
+               </div>
+             ))}
+
+>>>>>>> refs/remotes/origin/main
             {videoMode === 'file' && rfPredictions.map(pred => {
               const currentVideo = videoRef.current;
               const baseWidth = currentVideo ? (currentVideo.videoWidth || currentVideo.clientWidth || 640) : 640;
@@ -847,6 +944,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               const top = (pred.y - pred.height / 2) * scaleY;
               const width = pred.width * scaleX;
               const height = pred.height * scaleY;
+<<<<<<< HEAD
               let color = 'border-slate-400';
               if (pred.class === 'scissor') color = 'border-sky-400';
               else if (pred.class === 'retractor') color = 'border-emerald-400';
@@ -854,6 +952,15 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               else if (pred.class === 'elevator') color = 'border-violet-400';
               else if (pred.class === 'forceps') color = 'border-pink-400';
               else if (pred.class === 'syringe') color = 'border-rose-400';
+=======
+              let color = 'border-white';
+              if (pred.class === 'scissor') color = 'border-blue-500';
+              else if (pred.class === 'retractor') color = 'border-green-500';
+              else if (pred.class === 'mallet') color = 'border-yellow-400';
+              else if (pred.class === 'elevator') color = 'border-purple-500';
+              else if (pred.class === 'forceps') color = 'border-pink-500';
+              else if (pred.class === 'syringe') color = 'border-red-500';
+>>>>>>> refs/remotes/origin/main
               return (
                 <div
                   key={pred.id}
@@ -880,7 +987,11 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
                return (
                  <>
                    <div 
+<<<<<<< HEAD
                      className="absolute border border-emerald-400/40 bg-emerald-500/10 pointer-events-none rounded"
+=======
+                     className="absolute border-2 border-green-500/30 bg-green-500/10 pointer-events-none"
+>>>>>>> refs/remotes/origin/main
                      style={{
                          left: zonesToRender.tray.x1 * displaySize.width,
                          top: zonesToRender.tray.y1 * displaySize.height,
@@ -889,7 +1000,11 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
                      }}
                    />
                    <div 
+<<<<<<< HEAD
                      className="absolute border border-rose-400/40 bg-rose-500/10 pointer-events-none rounded"
+=======
+                     className="absolute border-2 border-red-500/30 bg-red-500/10 pointer-events-none"
+>>>>>>> refs/remotes/origin/main
                      style={{
                          left: zonesToRender.incision.x1 * displaySize.width,
                          top: zonesToRender.incision.y1 * displaySize.height,
@@ -927,6 +1042,11 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               <div className="text-xs text-slate-400">
                 Baseline saved
               </div>
+            )}
+            {videoMode === 'file' && snapshotMode && (
+              <span className="text-xs text-gray-500">
+                Overshoot running on snapshots for uploaded video
+              </span>
             )}
           </div>
 
@@ -1047,11 +1167,14 @@ const CameraPreview = ({ forwardedRef, externalStream, videoFileUrl, videoMode }
       }
     };
   }, [forwardedRef, externalStream, videoFileUrl, videoMode]);
+<<<<<<< HEAD
 
   const videoClassName =
     videoMode === 'camera'
       ? 'w-full h-full block object-cover brightness-110 contrast-125'
       : 'w-full h-full block object-contain';
+=======
+>>>>>>> refs/remotes/origin/main
 
   return (
     <video 
@@ -1262,7 +1385,7 @@ function buildCountsFromRoboflow(result) {
   const allowedClasses = ['scissor', 'retractor', 'mallet', 'elevator', 'forceps', 'syringe'];
   const minConfidence = 0.7;
 
-  const predictions = predictionsArray
+  const rawPredictions = predictionsArray
     .map((p, idx) => ({
       id: p.id || idx,
       class: p.class || p.name || 'unknown',
@@ -1273,6 +1396,56 @@ function buildCountsFromRoboflow(result) {
       height: p.height,
     }))
     .filter(p => allowedClasses.includes(p.class) && p.confidence >= minConfidence);
+  const predictions = [];
+  const iouThreshold = 0.5;
+  const sorted = rawPredictions.slice().sort((a, b) => b.confidence - a.confidence);
+  sorted.forEach(candidate => {
+    if (
+      typeof candidate.x !== 'number' ||
+      typeof candidate.y !== 'number' ||
+      typeof candidate.width !== 'number' ||
+      typeof candidate.height !== 'number'
+    ) {
+      return;
+    }
+    const keep = !predictions.some(existing => {
+      if (existing.class !== candidate.class) {
+        return false;
+      }
+      const ax1 = existing.x - existing.width / 2;
+      const ay1 = existing.y - existing.height / 2;
+      const ax2 = existing.x + existing.width / 2;
+      const ay2 = existing.y + existing.height / 2;
+      const bx1 = candidate.x - candidate.width / 2;
+      const by1 = candidate.y - candidate.height / 2;
+      const bx2 = candidate.x + candidate.width / 2;
+      const by2 = candidate.y + candidate.height / 2;
+      const ix1 = Math.max(ax1, bx1);
+      const iy1 = Math.max(ay1, by1);
+      const ix2 = Math.min(ax2, bx2);
+      const iy2 = Math.min(ay2, by2);
+      const iw = Math.max(0, ix2 - ix1);
+      const ih = Math.max(0, iy2 - iy1);
+      const intersection = iw * ih;
+      if (intersection <= 0) {
+        return false;
+      }
+      const areaA = (ax2 - ax1) * (ay2 - ay1);
+      const areaB = (bx2 - bx1) * (by2 - by1);
+      if (areaA <= 0 || areaB <= 0) {
+        return false;
+      }
+      const union = areaA + areaB - intersection;
+      if (union <= 0) {
+        return false;
+      }
+      const iou = intersection / union;
+      return iou >= iouThreshold;
+    });
+    if (keep) {
+      predictions.push(candidate);
+    }
+  });
   const counts = {};
   predictions.forEach(pred => {
     const label = pred.class;

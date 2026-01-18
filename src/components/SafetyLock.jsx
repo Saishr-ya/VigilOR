@@ -26,10 +26,10 @@ const SafetyLock = ({ incisionCount, onLock }) => {
       {!showConfirm ? (
         <button
           onClick={handleClick}
-          className={`w-full py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2 transition-colors ${
+          className={`w-full py-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors shadow ${
             incisionCount > 0
-              ? 'bg-red-600 hover:bg-red-700 text-white shadow-lg animate-pulse'
-              : 'bg-blue-600 hover:bg-blue-700 text-white shadow'
+              ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg animate-pulse'
+              : 'bg-sky-500 hover:bg-sky-400 text-slate-950'
           }`}
         >
           {incisionCount > 0 ? (
@@ -45,18 +45,18 @@ const SafetyLock = ({ incisionCount, onLock }) => {
           )}
         </button>
       ) : (
-        <div className="bg-white border-2 border-blue-500 rounded-lg p-4 shadow-lg">
-          <p className="text-center font-semibold mb-4">Confirm patient closure?</p>
+        <div className="bg-slate-900 border border-sky-500/60 rounded-xl p-4 shadow-lg">
+          <p className="text-center font-medium mb-4 text-sm text-slate-100">Confirm patient closure?</p>
           <div className="flex gap-4 justify-center">
             <button
               onClick={() => setShowConfirm(false)}
-              className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+              className="px-4 py-2 text-xs rounded border border-slate-600 text-slate-100 hover:bg-slate-800/80"
             >
               Cancel
             </button>
             <button
               onClick={handleConfirm}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              className="px-4 py-2 text-xs rounded bg-sky-500 text-slate-950 hover:bg-sky-400"
             >
               Confirm Close
             </button>

@@ -32,6 +32,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   const zoneTemplatesRef = useRef({ tray: null, incision: null });
   const trackedItemsRef = useRef([]);
   const [trackingActive, setTrackingActive] = useState(false);
+  const [osdTime, setOsdTime] = useState('');
 
   const handleVideoFileChange = event => {
     const file = event.target.files && event.target.files[0];
@@ -118,6 +119,25 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   useEffect(() => {
     trackedItemsRef.current = trackedItems;
   }, [trackedItems]);
+
+  useEffect(() => {
+    if (videoMode !== 'camera') {
+      setOsdTime('');
+      return;
+    }
+    const update = () => {
+      const now = new Date();
+      const pad = (value) => value.toString().padStart(2, '0');
+      const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+      setOsdTime(`${date} ${time}`);
+    };
+    update();
+    const id = setInterval(update, 1000);
+    return () => {
+      clearInterval(id);
+    };
+  }, [videoMode]);
 
   useEffect(() => {
     const apiKey = import.meta.env.VITE_OVERSHOOT_API_KEY;
@@ -693,14 +713,14 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   const hasRetainedInIncision = incisionCount > 0;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-140px)] gap-4">
+    <div className="flex flex-col h-[calc(100vh-140px)] gap-4 text-slate-100">
       {showIncisionPopup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-lg shadow-lg p-4 max-w-sm w-full">
-            <div className="font-semibold text-red-700 mb-2">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70">
+          <div className="bg-slate-900 border border-rose-500/50 rounded-xl shadow-xl p-4 max-w-sm w-full">
+            <div className="font-semibold text-rose-200 mb-2 text-sm">
               Items still in incision zone
             </div>
-            <div className="text-sm text-gray-800 mb-3">
+            <div className="text-xs text-slate-200 mb-3 space-y-1">
               {incisionCount > 0 ? (
                 Object.entries(incisionSummaryByType).map(([type, count]) => (
                   <div key={type}>
@@ -711,12 +731,14 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
                 <div>Items remain in the incision zone.</div>
               )}
             </div>
-            <button
-              onClick={() => setShowIncisionPopup(false)}
-              className="px-4 py-2 rounded bg-red-600 text-white text-sm hover:bg-red-700"
-            >
-              OK
-            </button>
+            <div className="flex justify-end">
+              <button
+                onClick={() => setShowIncisionPopup(false)}
+                className="px-4 py-1.5 rounded-lg bg-rose-500 text-slate-950 text-xs font-medium hover:bg-rose-400"
+              >
+                OK
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -725,15 +747,15 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={() => onVideoModeChange('camera')}
-              className={`px-3 py-1 rounded-full text-sm border ${
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                 videoMode === 'camera'
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-white text-gray-700 border-gray-300'
+                  ? 'bg-sky-500 text-slate-950 border-sky-400 shadow'
+                  : 'bg-slate-900 text-slate-100 border-slate-700 hover:border-sky-400/60'
               }`}
             >
               Live camera
             </button>
-            <label className="px-3 py-1 rounded-full text-sm border bg-white text-gray-700 border-gray-300 cursor-pointer">
+            <label className="px-3 py-1 rounded-full text-xs font-medium border bg-slate-900 text-slate-100 border-slate-700 hover:border-sky-400/60 cursor-pointer transition-colors">
               Upload video
               <input
                 type="file"
@@ -743,27 +765,64 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               />
             </label>
             {videoMode === 'file' && videoFileUrl && (
-              <span className="text-xs text-gray-500">
+              <span className="text-[11px] text-slate-400">
                 Using uploaded video
               </span>
             )}
           </div>
 
-          <div className="bg-black rounded-lg overflow-hidden shadow-lg relative">
-           <CameraPreview
-             forwardedRef={videoRef}
-             externalStream={externalStream}
-             videoFileUrl={videoFileUrl}
-             videoMode={videoMode}
-           />
-           
-           {/* Overlay for tracked items */}
+          <div className="bg-slate-900 rounded-2xl overflow-hidden shadow-lg border border-slate-800 relative">
+            <div className="relative bg-black/90">
+              <div className="aspect-video">
+                <CameraPreview
+                  forwardedRef={videoRef}
+                  externalStream={externalStream}
+                  videoFileUrl={videoFileUrl}
+                  videoMode={videoMode}
+                />
+              </div>
+            </div>
+
            <div className="absolute inset-0 pointer-events-none">
+             {videoMode === 'camera' && (
+               <div className="absolute inset-0 cctv-overlay">
+                 <div className="absolute top-3 left-3 w-8 h-8 border-t border-l border-slate-500/60" />
+                 <div className="absolute top-3 right-3 w-8 h-8 border-t border-r border-slate-500/60" />
+                 <div className="absolute bottom-3 left-3 w-8 h-8 border-b border-l border-slate-500/60" />
+                 <div className="absolute bottom-3 right-3 w-8 h-8 border-b border-r border-slate-500/60" />
+
+                 <div className="absolute left-1/2 top-6 bottom-6 w-px -translate-x-1/2 bg-slate-700/40" />
+                 <div className="absolute top-1/2 left-6 right-6 h-px -translate-y-1/2 bg-slate-700/40" />
+
+                 <div className="absolute top-3 left-4 text-[11px] font-mono tracking-[0.18em] text-slate-200 uppercase">
+                   CAM 01 · OR SUITE
+                 </div>
+                 <div className="absolute top-3 right-4 flex items-center gap-4 text-[11px] font-mono text-slate-200">
+                   <div className="flex items-center gap-1">
+                     <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-sm" />
+                     <span>REC</span>
+                   </div>
+                   {osdTime && (
+                     <span>{osdTime}</span>
+                   )}
+                 </div>
+                 <div className="absolute bottom-3 left-4 flex items-center gap-3 text-[11px] font-mono text-slate-200">
+                   <span className="px-1.5 py-0.5 border border-slate-500/80 rounded bg-black/60 tracking-[0.18em]">
+                     VIGILOR
+                   </span>
+                   <span className="text-slate-400">AI MONITOR</span>
+                 </div>
+                 <div className="absolute bottom-3 right-4 flex items-center gap-3 text-[11px] font-mono text-slate-200">
+                   <span className="text-slate-400">1080P</span>
+                   <span className="text-slate-400">30 FPS</span>
+                 </div>
+               </div>
+             )}
              {trackedItems.filter(item => item.zone === 'tray' || item.zone === 'incision').map((item) => (
                <div 
                  key={item.id}
-                 className={`absolute w-6 h-6 rounded-full border-2 border-white shadow-sm transition-all duration-300 ${
-                   item.zone === 'incision' ? 'bg-red-500' : 'bg-green-500'
+                   className={`absolute w-6 h-6 rounded-full border-2 border-slate-900 shadow-sm transition-all duration-300 ${
+                   item.zone === 'incision' ? 'bg-rose-500' : 'bg-emerald-400'
                  }`}
                  style={{ 
                    left: item.x * displaySize.width, 
@@ -772,7 +831,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
                    opacity: (Date.now() - item.lastSeen) > 300 ? 0.5 : 1
                  }}
                >
-                 <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+                 <span className="absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-950/80 text-slate-100 text-[11px] px-2 py-0.5 rounded-md whitespace-nowrap">
                    {item.type}
                  </span>
                </div>
@@ -788,17 +847,17 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               const top = (pred.y - pred.height / 2) * scaleY;
               const width = pred.width * scaleX;
               const height = pred.height * scaleY;
-              let color = 'border-white';
-              if (pred.class === 'scissor') color = 'border-blue-500';
-              else if (pred.class === 'retractor') color = 'border-green-500';
-              else if (pred.class === 'mallet') color = 'border-yellow-400';
-              else if (pred.class === 'elevator') color = 'border-purple-500';
-              else if (pred.class === 'forceps') color = 'border-pink-500';
-              else if (pred.class === 'syringe') color = 'border-red-500';
+              let color = 'border-slate-400';
+              if (pred.class === 'scissor') color = 'border-sky-400';
+              else if (pred.class === 'retractor') color = 'border-emerald-400';
+              else if (pred.class === 'mallet') color = 'border-amber-300';
+              else if (pred.class === 'elevator') color = 'border-violet-400';
+              else if (pred.class === 'forceps') color = 'border-pink-400';
+              else if (pred.class === 'syringe') color = 'border-rose-400';
               return (
                 <div
                   key={pred.id}
-                  className={`absolute border-2 ${color} bg-black/10`}
+                  className={`absolute border-2 ${color} bg-slate-950/10 rounded`}
                   style={{
                     left,
                     top,
@@ -806,7 +865,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
                     height,
                   }}
                 >
-                  <span className="absolute -top-6 left-0 bg-black/80 text-white text-xs px-2 py-1">
+                  <span className="absolute -top-5 left-0 bg-slate-950/90 text-slate-50 text-[11px] px-2 py-0.5 rounded">
                     {pred.class} {(pred.confidence * 100).toFixed(0)}%
                   </span>
                 </div>
@@ -821,7 +880,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
                return (
                  <>
                    <div 
-                     className="absolute border-2 border-green-500/30 bg-green-500/10 pointer-events-none"
+                     className="absolute border border-emerald-400/40 bg-emerald-500/10 pointer-events-none rounded"
                      style={{
                          left: zonesToRender.tray.x1 * displaySize.width,
                          top: zonesToRender.tray.y1 * displaySize.height,
@@ -830,7 +889,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
                      }}
                    />
                    <div 
-                     className="absolute border-2 border-red-500/30 bg-red-500/10 pointer-events-none"
+                     className="absolute border border-rose-400/40 bg-rose-500/10 pointer-events-none rounded"
                      style={{
                          left: zonesToRender.incision.x1 * displaySize.width,
                          top: zonesToRender.incision.y1 * displaySize.height,
@@ -843,8 +902,8 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
              })()}
            </div>
            
-           <div className="absolute top-4 right-4 bg-black/60 text-white px-3 py-1 rounded-full text-sm flex items-center gap-2">
-             <div className={`w-2 h-2 rounded-full ${isProcessing ? 'bg-green-400' : 'bg-yellow-400'}`} />
+           <div className="absolute top-4 right-4 bg-slate-950/70 text-slate-50 px-3 py-1 rounded-full text-[11px] flex items-center gap-2 border border-slate-700">
+             <div className={`w-1.5 h-1.5 rounded-full ${isProcessing ? 'bg-emerald-400' : 'bg-amber-300'}`} />
              {isProcessing ? 'Active' : 'Initializing...'}
            </div>
           </div>
@@ -853,44 +912,39 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
             <button
               onClick={() => handleScan('baseline')}
               disabled={scanLoading}
-              className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 rounded-lg bg-sky-500 text-slate-950 hover:bg-sky-400 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium shadow"
             >
               {scanPhase === 'baseline' && scanLoading ? 'Capturing baseline...' : 'Capture Baseline Scan'}
             </button>
             <button
               onClick={() => handleScan('post')}
               disabled={scanLoading || !baselineCounts}
-              className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 rounded-lg bg-indigo-500 text-slate-950 hover:bg-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium shadow"
             >
               {scanPhase === 'post' && scanLoading ? 'Capturing post-surgery...' : 'Capture Post-Surgery Scan'}
             </button>
             {baselineCounts && (
-              <div className="text-sm text-gray-600">
+              <div className="text-xs text-slate-400">
                 Baseline saved
               </div>
-            )}
-            {videoMode === 'file' && snapshotMode && (
-              <span className="text-xs text-gray-500">
-                Overshoot running on snapshots for uploaded video
-              </span>
             )}
           </div>
 
           {scanError && (
-            <div className="mt-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+            <div className="mt-2 text-xs text-rose-200 bg-rose-950/40 border border-rose-500/40 rounded px-3 py-2">
               Roboflow error: {scanError}
             </div>
           )}
 
           {baselineCounts && postCounts && (
             <div
-              className={`mt-4 text-sm rounded px-3 py-2 border ${
+              className={`mt-4 text-xs rounded-xl px-3 py-2 border ${
                 hasRetainedInIncision || hasDiscrepancy
-                  ? 'bg-red-50 border-red-200 text-red-800'
-                  : 'bg-green-50 border-green-200 text-green-800'
+                  ? 'bg-rose-950/40 border-rose-500/40 text-rose-100'
+                  : 'bg-emerald-950/40 border-emerald-500/40 text-emerald-100'
               }`}
             >
-              <div className="font-semibold mb-1">
+              <div className="font-medium mb-1">
                 {hasRetainedInIncision
                   ? 'Items still in incision zone'
                   : hasDiscrepancy
@@ -919,8 +973,8 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
                 </div>
               )}
               {hasRetainedInIncision && (
-                <div className="mt-3 text-sm rounded px-3 py-2 border bg-red-50 border-red-200 text-red-800">
-                  <div className="font-semibold mb-1">
+                <div className="mt-3 text-xs rounded px-3 py-2 border bg-rose-950/40 border-rose-500/50 text-rose-100">
+                  <div className="font-medium mb-1">
                     {incisionCount} item{incisionCount > 1 ? 's' : ''} still in incision zone
                   </div>
                   <div className="space-y-1">
@@ -994,12 +1048,17 @@ const CameraPreview = ({ forwardedRef, externalStream, videoFileUrl, videoMode }
     };
   }, [forwardedRef, externalStream, videoFileUrl, videoMode]);
 
+  const videoClassName =
+    videoMode === 'camera'
+      ? 'w-full h-full block object-cover brightness-110 contrast-125'
+      : 'w-full h-full block object-contain';
+
   return (
     <video 
       ref={forwardedRef}
       playsInline 
       muted 
-      className="w-full h-auto block"
+      className={videoClassName}
     />
   );
 };

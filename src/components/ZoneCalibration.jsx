@@ -202,15 +202,15 @@ const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVide
       <div className="flex flex-wrap items-center gap-3">
         <button
           onClick={() => onVideoModeChange('camera')}
-          className={`px-3 py-1 rounded-full text-sm border ${
+          className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
             videoMode === 'camera'
-              ? 'bg-blue-600 text-white border-blue-600'
-              : 'bg-white text-gray-700 border-gray-300'
+              ? 'bg-sky-500 text-slate-950 border-sky-400 shadow-sm'
+              : 'bg-slate-800 text-slate-100 border-slate-600 hover:border-sky-400/60'
           }`}
         >
           Live camera
         </button>
-        <label className="px-3 py-1 rounded-full text-sm border bg-white text-gray-700 border-gray-300 cursor-pointer">
+        <label className="px-3 py-1 rounded-full text-xs font-medium border bg-slate-800 text-slate-100 border-slate-600 hover:border-sky-400/60 cursor-pointer transition-colors">
           Upload video
           <input
             type="file"
@@ -229,10 +229,10 @@ const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVide
       <div className="flex gap-4 mb-4">
         <button
           onClick={() => setActiveZone('tray')}
-          className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
+          className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors ${
             activeZone === 'tray' 
-              ? 'bg-green-600 text-white' 
-              : 'bg-gray-200 text-gray-700'
+              ? 'bg-emerald-500 text-slate-950 shadow' 
+              : 'bg-slate-800 text-slate-100'
           }`}
         >
           <MousePointer2 size={20} />
@@ -240,10 +240,10 @@ const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVide
         </button>
         <button
           onClick={() => setActiveZone('incision')}
-          className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
+          className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors ${
             activeZone === 'incision' 
-              ? 'bg-red-600 text-white' 
-              : 'bg-gray-200 text-gray-700'
+              ? 'bg-rose-500 text-slate-950 shadow' 
+              : 'bg-slate-800 text-slate-100'
           }`}
         >
           <MousePointer2 size={20} />
@@ -253,7 +253,7 @@ const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVide
 
       <div 
         ref={containerRef}
-        className="relative rounded-lg overflow-hidden border-2 border-gray-300 shadow-lg cursor-crosshair w-full"
+        className="relative rounded-2xl overflow-hidden border border-slate-700 bg-slate-900/60 shadow-lg cursor-crosshair w-full"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -274,7 +274,7 @@ const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVide
 
       {videoMode === 'file' && videoFileUrl && videoDuration > 0 && (
         <div className="w-full mt-2 flex flex-col gap-2">
-          <div className="flex items-center justify-between text-xs text-gray-500">
+          <div className="flex items-center justify-between text-[11px] text-slate-400">
             <span>{videoTime.toFixed(2)}s</span>
             <span>{videoDuration.toFixed(2)}s</span>
           </div>
@@ -291,14 +291,14 @@ const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVide
             <button
               type="button"
               onClick={() => seekTo(videoTime - 1 / 30)}
-              className="px-3 py-1 text-xs rounded border border-gray-300 hover:bg-gray-100"
+              className="px-3 py-1 text-[11px] rounded border border-slate-600 text-slate-100 hover:bg-slate-800/80"
             >
               Prev frame
             </button>
             <button
               type="button"
               onClick={() => seekTo(videoTime + 1 / 30)}
-              className="px-3 py-1 text-xs rounded border border-gray-300 hover:bg-gray-100"
+              className="px-3 py-1 text-[11px] rounded border border-slate-600 text-slate-100 hover:bg-slate-800/80"
             >
               Next frame
             </button>
@@ -309,7 +309,7 @@ const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVide
       <div className="flex gap-4 mt-4">
         <button
           onClick={() => setZones({ tray: null, incision: null })}
-          className="px-6 py-2 rounded-lg border border-gray-300 hover:bg-gray-100 flex items-center gap-2"
+          className="px-6 py-2 rounded-lg border border-slate-600 text-slate-100 hover:bg-slate-800/80 flex items-center gap-2 text-sm font-medium"
         >
           <RotateCcw size={20} />
           Reset
@@ -317,14 +317,14 @@ const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVide
         <button
           onClick={() => onSave(zones)}
           disabled={!zones.tray || !zones.incision}
-          className="px-6 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          className="px-6 py-2 rounded-lg bg-sky-500 text-slate-950 hover:bg-sky-400 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-semibold shadow"
         >
           <Check size={20} />
           Save & Continue
         </button>
       </div>
       
-      <p className="text-gray-500 text-sm">
+      <p className="text-slate-400 text-xs">
         Draw a box around the instrument tray (green) and the surgical site (red).
       </p>
     </div>

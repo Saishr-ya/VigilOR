@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { RealtimeVision } from '@overshoot/sdk';
+import { Lock, Unlock } from 'lucide-react';
 import Tally from './Tally';
-import SafetyLock from './SafetyLock';
 import { useItemTracking } from '../hooks/useItemTracking';
 
 const ROBOFLOW_VALIDATION_INTERVAL_MINUTES = 2;
@@ -30,6 +30,8 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   const [baselineObjectHints, setBaselineObjectHints] = useState(null);
   const [baselineTrayCount, setBaselineTrayCount] = useState(null);
   const [baselineIncisionCount, setBaselineIncisionCount] = useState(null);
+  const [isLocked, setIsLocked] = useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const zoneTemplatesRef = useRef({ tray: null, incision: null });
   const trackedItemsRef = useRef([]);
   const [trackingActive, setTrackingActive] = useState(false);
@@ -793,8 +795,37 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
           </div>
         </div>
       )}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
-        <div className="lg:col-span-2 flex flex-col gap-6">
+      {showCloseConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-xl p-4 max-w-sm w-full">
+            <div className="font-semibold text-slate-200 mb-2 text-sm">
+              Close Session
+            </div>
+            <div className="text-xs text-slate-300 mb-4">
+              Are you sure you want to close this session? This will end the current monitoring session.
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowCloseConfirm(false)}
+                className="px-4 py-2 rounded-lg bg-slate-700 text-slate-100 text-sm font-medium hover:bg-slate-600 border border-slate-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowCloseConfirm(false);
+                  onClosePatient();
+                }}
+                className="px-4 py-2 rounded-lg bg-sky-500 text-slate-950 text-sm font-medium hover:bg-sky-400"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="flex flex-col gap-6 flex-1">
+        <div className="flex flex-col gap-6">
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={() => onVideoModeChange('camera')}
@@ -978,20 +1009,35 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               onClick={() => {
                 if (incisionCount > 0) {
                   alert("WARNING: ITEMS STILL IN PATIENT! CANNOT CLOSE.");
-                } else {
-                  const confirmClose = window.confirm("Confirm patient closure?");
-                  if (confirmClose) {
-                    onClosePatient();
-                  }
+                } else if (!isLocked) {
+                  setShowCloseConfirm(true);
                 }
               }}
-              className={`px-4 py-2 rounded-lg font-medium text-sm shadow ${
+              className={`pr-4 pl-2 py-2 rounded-lg font-medium text-sm shadow flex items-center gap-2 transition-colors ${
                 incisionCount > 0 
                   ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse' 
-                  : 'bg-sky-500 hover:bg-sky-400 text-slate-950'
+                  : isLocked
+                    ? 'bg-slate-800 text-slate-500 border border-slate-700'
+                    : 'bg-sky-500 hover:bg-sky-400 text-slate-950'
               }`}
             >
-              {incisionCount > 0 ? `WARNING: ${incisionCount} ITEMS IN PATIENT` : 'Close Patient'}
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsLocked(!isLocked);
+                }}
+                className={`p-1 rounded-md transition-colors ${
+                  incisionCount > 0
+                    ? 'hover:bg-rose-700'
+                    : isLocked
+                      ? 'hover:bg-slate-700 text-slate-400'
+                      : 'hover:bg-sky-600/20'
+                }`}
+                title={isLocked ? "Unlock session" : "Lock session"}
+              >
+                {isLocked ? <Lock size={16} /> : <Unlock size={16} />}
+              </div>
+              {incisionCount > 0 ? `WARNING: ${incisionCount} ITEMS IN PATIENT` : 'Close Session'}
             </button>
             {baselineCounts && (
               <div className="text-xs text-slate-400">
@@ -1064,10 +1110,6 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               incision: Array(incisionCount).fill(null),
             }}
           />
-        </div>
-
-        <div className="flex flex-col gap-6 justify-center h-full">
-          <SafetyLock incisionCount={incisionCount} onLock={onClosePatient} />
         </div>
       </div>
       {apiError && (

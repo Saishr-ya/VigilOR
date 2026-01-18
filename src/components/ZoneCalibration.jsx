@@ -253,7 +253,7 @@ const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVide
 
       <div 
         ref={containerRef}
-        className="relative rounded-lg overflow-hidden border-2 border-gray-300 shadow-lg cursor-crosshair w-full"
+        className="relative rounded-lg overflow-hidden border-2 border-gray-300 shadow-lg cursor-crosshair w-full h-[calc(100vh-260px)] max-h-[calc(100vh-260px)]"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -264,7 +264,7 @@ const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVide
           autoPlay 
           playsInline 
           muted 
-          className="w-full h-auto block"
+          className="w-full h-full object-contain bg-black block"
         />
         <canvas 
           ref={canvasRef} 
@@ -323,8 +323,7 @@ const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVide
           Save & Continue
         </button>
       </div>
-      
-      <p className="text-gray-500 text-sm">
+      <p className="text-gray-500 text-sm text-center">
         Draw a box around the instrument tray (green) and the surgical site (red).
       </p>
     </div>

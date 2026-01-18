@@ -95,7 +95,6 @@ export const useItemTracking = (analysisResult) => {
 
         const nextZone = detection.zone;
         const prevStableZone = item.stableZone != null ? item.stableZone : item.zone;
-
         let stableZone = prevStableZone;
         let pendingZone = item.pendingZone != null ? item.pendingZone : prevStableZone;
         let pendingCount = item.pendingCount != null ? item.pendingCount : 0;

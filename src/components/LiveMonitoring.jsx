@@ -29,6 +29,8 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   const [dynamicZones, setDynamicZones] = useState(zones);
   const dynamicZonesRef = useRef(zones);
   const [baselineObjectHints, setBaselineObjectHints] = useState(null);
+  const [baselineTrayCount, setBaselineTrayCount] = useState(null);
+  const [baselineIncisionCount, setBaselineIncisionCount] = useState(null);
   const zoneTemplatesRef = useRef({ tray: null, incision: null });
   const trackedItemsRef = useRef([]);
   const [trackingActive, setTrackingActive] = useState(false);
@@ -408,9 +410,22 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
         incision_count: incisionZoneCount
       });
 
-      const scanCounts = counts || {};
+      const scanCounts = itemsFromRoboflow.reduce((acc, item) => {
+        if (!item.zone) {
+          return acc;
+        }
+        if (!item.type) {
+          return acc;
+        }
+        acc[item.type] = (acc[item.type] || 0) + 1;
+        return acc;
+      }, {});
 
       if (phase === 'baseline') {
+        const trayAtBaseline = itemsFromRoboflow.filter(item => item.zone === 'tray').length;
+        const incisionAtBaseline = itemsFromRoboflow.filter(item => item.zone === 'incision').length;
+        setBaselineTrayCount(trayAtBaseline);
+        setBaselineIncisionCount(incisionAtBaseline);
         setBaselineCounts(scanCounts);
         setPostCounts(null);
         setDiscrepancy(null);
@@ -430,7 +445,14 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
     } finally {
       setScanLoading(false);
       const video = videoRef.current;
-      if (video && video.paused) {
+      if (!video) {
+        return;
+      }
+      if (videoMode === 'file') {
+        if (phase === 'baseline' && video.paused && !video.ended) {
+          video.play().catch(() => {});
+        }
+      } else if (video.paused) {
         video.play().catch(() => {});
       }
     }
@@ -681,7 +703,34 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   const roboPostTotal = postCounts ? Object.values(postCounts).reduce((sum, v) => sum + v, 0) : null;
   const overshootTotal = overshootCounts ? Object.values(overshootCounts).reduce((sum, v) => sum + v, 0) : null;
 
-  const incisionCount = counts.incision || 0;
+  const baselineTotal =
+    baselineTrayCount != null && baselineIncisionCount != null
+      ? baselineTrayCount + baselineIncisionCount
+      : null;
+
+  const rawIncisionCount =
+    analysisResult && Array.isArray(analysisResult.items)
+      ? analysisResult.items.filter(item => item.zone === 'incision').length
+      : null;
+  const liveIncisionFromTracking = trackedItems.filter(item => item.zone === 'incision').length;
+  const liveIncisionCount =
+    rawIncisionCount != null ? rawIncisionCount : liveIncisionFromTracking;
+
+  const effectiveIncisionCount =
+    baselineTotal != null ? Math.min(baselineTotal, liveIncisionCount) : liveIncisionCount;
+
+  const rawTrayCount =
+    analysisResult && Array.isArray(analysisResult.items)
+      ? analysisResult.items.filter(item => item.zone === 'tray').length
+      : null;
+  const liveTrayFromTracking = trackedItems.filter(item => item.zone === 'tray').length;
+
+  const effectiveTrayCount =
+    baselineTotal != null
+      ? Math.max(0, baselineTotal - effectiveIncisionCount)
+      : (rawTrayCount != null ? rawTrayCount : liveTrayFromTracking);
+
+  const incisionCount = effectiveIncisionCount;
   const incisionItems = trackedItems.filter(item => item.zone === 'incision');
   const incisionSummaryByType = incisionItems.reduce((acc, item) => {
     if (!item.type) {
@@ -807,7 +856,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
                   }}
                 >
                   <span className="absolute -top-6 left-0 bg-black/80 text-white text-xs px-2 py-1">
-                    {pred.class} {(pred.confidence * 100).toFixed(0)}%
+                    {pred.class}
                   </span>
                 </div>
               );
@@ -935,11 +984,16 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
             </div>
           )}
           
-          <Tally items={{ tray: trackedItems.filter(i => i.zone === 'tray'), incision: trackedItems.filter(i => i.zone === 'incision') }} />
+          <Tally
+            items={{
+              tray: Array(effectiveTrayCount).fill(null),
+              incision: Array(effectiveIncisionCount).fill(null)
+            }}
+          />
         </div>
 
         <div className="flex flex-col gap-6">
-          <SafetyLock incisionCount={counts.incision} onLock={onClosePatient} />
+          <SafetyLock incisionCount={effectiveIncisionCount} onLock={onClosePatient} />
           <EventLog events={events} />
         </div>
       </div>
@@ -1203,7 +1257,7 @@ function buildCountsFromRoboflow(result) {
   const allowedClasses = ['scissor', 'retractor', 'mallet', 'elevator', 'forceps', 'syringe'];
   const minConfidence = 0.7;
 
-  const predictions = predictionsArray
+  const rawPredictions = predictionsArray
     .map((p, idx) => ({
       id: p.id || idx,
       class: p.class || p.name || 'unknown',
@@ -1214,6 +1268,56 @@ function buildCountsFromRoboflow(result) {
       height: p.height,
     }))
     .filter(p => allowedClasses.includes(p.class) && p.confidence >= minConfidence);
+  const predictions = [];
+  const iouThreshold = 0.5;
+  const sorted = rawPredictions.slice().sort((a, b) => b.confidence - a.confidence);
+  sorted.forEach(candidate => {
+    if (
+      typeof candidate.x !== 'number' ||
+      typeof candidate.y !== 'number' ||
+      typeof candidate.width !== 'number' ||
+      typeof candidate.height !== 'number'
+    ) {
+      return;
+    }
+    const keep = !predictions.some(existing => {
+      if (existing.class !== candidate.class) {
+        return false;
+      }
+      const ax1 = existing.x - existing.width / 2;
+      const ay1 = existing.y - existing.height / 2;
+      const ax2 = existing.x + existing.width / 2;
+      const ay2 = existing.y + existing.height / 2;
+      const bx1 = candidate.x - candidate.width / 2;
+      const by1 = candidate.y - candidate.height / 2;
+      const bx2 = candidate.x + candidate.width / 2;
+      const by2 = candidate.y + candidate.height / 2;
+      const ix1 = Math.max(ax1, bx1);
+      const iy1 = Math.max(ay1, by1);
+      const ix2 = Math.min(ax2, bx2);
+      const iy2 = Math.min(ay2, by2);
+      const iw = Math.max(0, ix2 - ix1);
+      const ih = Math.max(0, iy2 - iy1);
+      const intersection = iw * ih;
+      if (intersection <= 0) {
+        return false;
+      }
+      const areaA = (ax2 - ax1) * (ay2 - ay1);
+      const areaB = (bx2 - bx1) * (by2 - by1);
+      if (areaA <= 0 || areaB <= 0) {
+        return false;
+      }
+      const union = areaA + areaB - intersection;
+      if (union <= 0) {
+        return false;
+      }
+      const iou = intersection / union;
+      return iou >= iouThreshold;
+    });
+    if (keep) {
+      predictions.push(candidate);
+    }
+  });
   const counts = {};
   predictions.forEach(pred => {
     const label = pred.class;

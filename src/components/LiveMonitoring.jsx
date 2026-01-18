@@ -298,7 +298,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
     <div className="flex flex-col h-[calc(100vh-140px)] gap-4">
       {showIncisionPopup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-lg shadow-lg p-4 max-w-sm w-full">
+          <div className="bg-white rounded-lg shadow-lg p-[camc(100vh-200px)]x-w-sm w-full">
             <div className="font-semibold text-red-700 mb-2">
               Items still in incision zone
             </div>
@@ -322,57 +322,39 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
           </div>
         </div>
       )}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <Tally items={{ tray: trackedItems.filter(i => i.zone === 'tray'), incision: trackedItems.filter(i => i.zone === 'incision') }} />
-        </div>
-        <div className="lg:col-span-1">
-          <SafetyLock incisionCount={counts.incision} onLock={onClosePatient} />
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
-        <div className="lg:col-span-3 flex flex-col gap-6">
+        <div className="lg:col-span-2 flex flex-col gap-6">
           <div className="bg-black rounded-lg overflow-hidden shadow-lg relative">
            <CameraPreview forwardedRef={videoRef} externalStream={externalStream} />
            
            {/* Overlay for tracked items */}
            <div className="absolute inset-0 pointer-events-none">
-             {trackedItems.map((item) => {
-                // Estimate object size (you can adjust these values)
-                const objectWidth = 80; // pixels
-                const objectHeight = 80; // pixels
-                const centerX = item.x * displaySize.width;
-                const centerY = item.y * displaySize.height;
-
-                const inTray = item.x >= zones.tray.x1 && item.x <= zones.tray.x2 && item.y >= zones.tray.y1 && item.y <= zones.tray.y2;
-                const inIncision = item.x >= zones.incision.x1 && item.x <= zones.incision.x2 && item.y >= zones.incision.y1 && item.y <= zones.incision.y2;
-
-                let captionClass = 'bg-black/70 text-white';
-                if (inIncision && !inTray) {
-                  captionClass = 'bg-red-500/60 text-white';
-                } else if (inTray && !inIncision) {
-                  captionClass = 'bg-green-500/60 text-white';
-                }
-                
-                return (
-                  <div 
-                    key={item.id}
-                    className="absolute transition-all duration-300"
-                    style={{ 
-                      left: `${centerX}px`,
-                      top: `${centerY}px`,
-                      width: `${objectWidth}px`,
-                      height: `${objectHeight}px`,
-                      transform: 'translate(-50%, -50%)',
-                      opacity: (Date.now() - item.lastSeen) > 500 ? 0.6 : 1
-                    }}
-                  >
-                    <span className={`absolute -top-6 left-0 right-0 text-center text-xs px-2 py-1 rounded whitespace-nowrap ${captionClass}`}>
-                      {item.type}
-                    </span>
-                  </div>
-                );
+             {trackedItems.filter(item => item.zone === 'tray' || item.zone === 'incision').map((item) => {
+               // Estimate object size (you can adjust these values)
+               const objectWidth = 80; // pixels
+               const objectHeight = 80; // pixels
+               const centerX = item.x * displaySize.width;
+               const centerY = item.y * displaySize.height;
+               
+               return (
+                 <div 
+                   key={item.id}
+                   className={`absolute border-2 shadow-sm transition-all duration-300 ${
+                     item.zone === 'incision' ? 'border-red-500 bg-red-500/10' : 'border-green-500 bg-green-500/10'
+                   }`}
+                   style={{ 
+                     left: centerX - objectWidth / 2, 
+                     top: centerY - objectHeight / 2,
+                     width: objectWidth,
+                     height: objectHeight,
+                     opacity: (Date.now() - item.lastSeen) > 300 ? 0.5 : 1
+                   }}
+                 >
+                   <span className="absolute -bottom-6 left-0 right-0 text-center bg-black/70 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+                     {item.type}
+                   </span>
+                 </div>
+               );
              })}
 
             {rfPredictions.map(pred => {
@@ -518,6 +500,13 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
               )}
             </div>
           )}
+          
+          <Tally items={{ tray: trackedItems.filter(i => i.zone === 'tray'), incision: trackedItems.filter(i => i.zone === 'incision') }} />
+        </div>
+
+        <div className="flex flex-col gap-6">
+          <SafetyLock incisionCount={counts.incision} onLock={onClosePatient} />
+          <EventLog events={events} />
         </div>
       </div>
       {apiError && (

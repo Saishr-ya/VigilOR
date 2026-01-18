@@ -1,13 +1,37 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MousePointer2, Check, RotateCcw } from 'lucide-react';
 
-const ZoneCalibration = ({ onSave, initialZones }) => {
+const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVideoModeChange, onVideoFileChange }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
 
   useEffect(() => {
     let stream = null;
+
+    const video = videoRef.current;
+
+    if (videoMode === 'file' && videoFileUrl && video) {
+      video.srcObject = null;
+      video.src = videoFileUrl;
+      const handleLoadedMetadata = () => {
+        setVideoDuration(video.duration || 0);
+        video.pause();
+        try {
+          video.currentTime = 0;
+        } catch (e) {}
+        setVideoTime(0);
+      };
+      const handleTimeUpdate = () => {
+        setVideoTime(video.currentTime || 0);
+      };
+      video.addEventListener('loadedmetadata', handleLoadedMetadata);
+      video.addEventListener('timeupdate', handleTimeUpdate);
+      return () => {
+        video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        video.removeEventListener('timeupdate', handleTimeUpdate);
+      };
+    }
 
     const startCamera = async () => {
       try {
@@ -35,7 +59,19 @@ const ZoneCalibration = ({ onSave, initialZones }) => {
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, []);
+  }, [videoMode, videoFileUrl]);
+
+  const seekTo = (time) => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (!videoDuration) {
+      video.currentTime = time;
+      return;
+    }
+    const clamped = Math.max(0, Math.min(videoDuration, time));
+    video.pause();
+    video.currentTime = clamped;
+  };
   
   const [activeZone, setActiveZone] = useState('tray'); // 'tray' or 'incision'
   const [isDrawing, setIsDrawing] = useState(false);
@@ -43,53 +79,54 @@ const ZoneCalibration = ({ onSave, initialZones }) => {
     tray: null,
     incision: null
   });
-  const [startPos, setStartPos] = useState({ x: 0, y: 0 });
-  const [currentRect, setCurrentRect] = useState(null);
+  const [pathPoints, setPathPoints] = useState([]);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoTime, setVideoTime] = useState(0);
+
+  const handleVideoFileChange = event => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) {
+      return;
+    }
+    onVideoFileChange(file);
+    onVideoModeChange('file');
+  };
 
   const getNormalizedCoordinates = (e) => {
-    if (!containerRef.current) return { x: 0, y: 0 };
-
-    const rect = containerRef.current.getBoundingClientRect();
-    const border = 2; // border-2 is 2px
-
-    // Calculate relative to the content box (inside border)
-    const x = Math.max(0, Math.min(1, (e.clientX - rect.left - border) / (rect.width - 2 * border)));
-    const y = Math.max(0, Math.min(1, (e.clientY - rect.top - border) / (rect.height - 2 * border)));
-
+    if (!videoRef.current) return { x: 0, y: 0 };
+    const rect = videoRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
     return { x, y };
   };
 
   const handleMouseDown = (e) => {
     const coords = getNormalizedCoordinates(e);
-    setStartPos(coords);
     setIsDrawing(true);
-    setCurrentRect({ x: coords.x, y: coords.y, w: 0, h: 0 });
+    setPathPoints([coords]);
   };
 
   const handleMouseMove = (e) => {
     if (!isDrawing) return;
     
     const coords = getNormalizedCoordinates(e);
-    const w = coords.x - startPos.x;
-    const h = coords.y - startPos.y;
-    
-    setCurrentRect({
-      x: startPos.x,
-      y: startPos.y,
-      w,
-      h
-    });
+    setPathPoints(prev => [...prev, coords]);
   };
 
   const handleMouseUp = () => {
-    if (!isDrawing || !currentRect) return;
-    
-    // Normalize rect (handle negative width/height)
+    if (!isDrawing || pathPoints.length < 2) {
+      setIsDrawing(false);
+      setPathPoints([]);
+      return;
+    }
+
+    const xs = pathPoints.map(p => p.x);
+    const ys = pathPoints.map(p => p.y);
     const normalizedRect = {
-      x1: Math.min(startPos.x, startPos.x + currentRect.w),
-      y1: Math.min(startPos.y, startPos.y + currentRect.h),
-      x2: Math.max(startPos.x, startPos.x + currentRect.w),
-      y2: Math.max(startPos.y, startPos.y + currentRect.h)
+      x1: Math.min(...xs),
+      y1: Math.min(...ys),
+      x2: Math.max(...xs),
+      y2: Math.max(...ys)
     };
 
     setZones(prev => ({
@@ -98,7 +135,7 @@ const ZoneCalibration = ({ onSave, initialZones }) => {
     }));
     
     setIsDrawing(false);
-    setCurrentRect(null);
+    setPathPoints([]);
   };
 
   // Draw zones on canvas
@@ -109,17 +146,16 @@ const ZoneCalibration = ({ onSave, initialZones }) => {
     if (video && canvas) {
       const render = () => {
         if (video.readyState === video.HAVE_ENOUGH_DATA) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
+          const displayWidth = video.clientWidth || video.videoWidth;
+          const displayHeight = video.clientHeight || video.videoHeight;
+          canvas.width = displayWidth;
+          canvas.height = displayHeight;
           const ctx = canvas.getContext('2d');
           
-          // Clear canvas
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           
-          // Helper to draw rect
           const drawZone = (rect, color, label) => {
             if (!rect) return;
-            // Convert normalized to pixel coordinates for drawing
             const x1 = rect.x1 * canvas.width;
             const y1 = rect.y1 * canvas.height;
             const w = (rect.x2 - rect.x1) * canvas.width;
@@ -141,28 +177,55 @@ const ZoneCalibration = ({ onSave, initialZones }) => {
           drawZone(zones.tray, '#22c55e', 'Tray Zone');
           drawZone(zones.incision, '#ef4444', 'Incision Zone');
 
-          // Draw current drawing rect
-          if (isDrawing && currentRect) {
+          if (isDrawing && pathPoints.length > 1) {
             const color = activeZone === 'tray' ? '#22c55e' : '#ef4444';
-            // Convert normalized currentRect to pixels
-            const x = currentRect.x * canvas.width;
-            const y = currentRect.y * canvas.height;
-            const w = currentRect.w * canvas.width;
-            const h = currentRect.h * canvas.height;
-
             ctx.strokeStyle = color;
             ctx.lineWidth = 2;
-            ctx.strokeRect(x, y, w, h);
+            ctx.beginPath();
+            const first = pathPoints[0];
+            ctx.moveTo(first.x * canvas.width, first.y * canvas.height);
+            for (let i = 1; i < pathPoints.length; i += 1) {
+              const p = pathPoints[i];
+              ctx.lineTo(p.x * canvas.width, p.y * canvas.height);
+            }
+            ctx.stroke();
           }
         }
         requestAnimationFrame(render);
       };
       render();
     }
-  }, [zones, isDrawing, currentRect, activeZone]);
+  }, [zones, isDrawing, pathPoints, activeZone]);
 
   return (
     <div className="flex flex-col items-center gap-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => onVideoModeChange('camera')}
+          className={`px-3 py-1 rounded-full text-sm border ${
+            videoMode === 'camera'
+              ? 'bg-blue-600 text-white border-blue-600'
+              : 'bg-white text-gray-700 border-gray-300'
+          }`}
+        >
+          Live camera
+        </button>
+        <label className="px-3 py-1 rounded-full text-sm border bg-white text-gray-700 border-gray-300 cursor-pointer">
+          Upload video
+          <input
+            type="file"
+            accept="video/*"
+            onChange={handleVideoFileChange}
+            className="hidden"
+          />
+        </label>
+        {videoMode === 'file' && videoFileUrl && (
+          <span className="text-xs text-gray-500">
+            Using uploaded video
+          </span>
+        )}
+      </div>
+
       <div className="flex gap-4 mb-4">
         <button
           onClick={() => setActiveZone('tray')}
@@ -208,6 +271,40 @@ const ZoneCalibration = ({ onSave, initialZones }) => {
           className="absolute inset-0 pointer-events-none"
         />
       </div>
+
+      {videoMode === 'file' && videoFileUrl && videoDuration > 0 && (
+        <div className="w-full mt-2 flex flex-col gap-2">
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>{videoTime.toFixed(2)}s</span>
+            <span>{videoDuration.toFixed(2)}s</span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max={videoDuration}
+            step={videoDuration / 500 || 0.01}
+            value={videoTime}
+            onChange={(e) => seekTo(parseFloat(e.target.value))}
+            className="w-full"
+          />
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={() => seekTo(videoTime - 1 / 30)}
+              className="px-3 py-1 text-xs rounded border border-gray-300 hover:bg-gray-100"
+            >
+              Prev frame
+            </button>
+            <button
+              type="button"
+              onClick={() => seekTo(videoTime + 1 / 30)}
+              className="px-3 py-1 text-xs rounded border border-gray-300 hover:bg-gray-100"
+            >
+              Next frame
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-4 mt-4">
         <button

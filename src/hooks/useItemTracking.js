@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 
 const MATCH_THRESHOLD = 0.08;
 const MERGE_THRESHOLD = 0.08;
-const ZONE_STABLE_FRAMES = 2;
-const ITEM_STALE_MS = 300;
+const ZONE_STABLE_FRAMES = 1;
+const ITEM_STALE_MS = 1000;
 
 export const useItemTracking = (analysisResult) => {
   const [trackedItems, setTrackedItems] = useState([]);
@@ -103,6 +103,31 @@ export const useItemTracking = (analysisResult) => {
         if (nextZone === stableZone) {
           pendingZone = stableZone;
           pendingCount = 0;
+        } else if (nextZone === 'incision') {
+          const effectiveFrom = stableZone || item.lastNonNullZone;
+          if (nextZone && effectiveFrom && nextZone !== effectiveFrom) {
+            const eventType = 'entry';
+            const newEvent = {
+              id: Date.now() + Math.random(),
+              timestamp: Date.now(),
+              type: eventType,
+              itemType: item.type,
+              from: effectiveFrom,
+              to: nextZone
+            };
+            setEvents(prev => [newEvent, ...prev]);
+            console.log("[useItemTracking] Zone change", newEvent);
+          }
+
+          const key = item.type + ":" + item.id;
+          if (!inPatientRef.current.has(key)) {
+            inPatientRef.current.add(key);
+            console.log("[useItemTracking] Added to itemsInPatient", key);
+          }
+
+          stableZone = nextZone;
+          pendingZone = nextZone;
+          pendingCount = 0;
         } else {
           if (nextZone === pendingZone) {
             pendingCount += 1;
@@ -112,23 +137,19 @@ export const useItemTracking = (analysisResult) => {
           }
 
           if (pendingCount >= ZONE_STABLE_FRAMES && nextZone !== stableZone) {
-            // Determine effective source zone (handling null transitions)
             const effectiveFrom = stableZone || item.lastNonNullZone;
-            
-            // Only log if we are entering a valid zone (tray or incision)
-            // and coming from a different valid zone (or effective one)
             if (nextZone && effectiveFrom && nextZone !== effectiveFrom) {
-                const eventType = nextZone === 'incision' ? 'entry' : 'exit';
-                const newEvent = {
-                  id: Date.now() + Math.random(),
-                  timestamp: Date.now(),
-                  type: eventType,
-                  itemType: item.type,
-                  from: effectiveFrom,
-                  to: nextZone
-                };
-                setEvents(prev => [newEvent, ...prev]);
-                console.log("[useItemTracking] Zone change", newEvent);
+              const eventType = nextZone === 'incision' ? 'entry' : 'exit';
+              const newEvent = {
+                id: Date.now() + Math.random(),
+                timestamp: Date.now(),
+                type: eventType,
+                itemType: item.type,
+                from: effectiveFrom,
+                to: nextZone
+              };
+              setEvents(prev => [newEvent, ...prev]);
+              console.log("[useItemTracking] Zone change", newEvent);
             }
 
             const key = item.type + ":" + item.id;

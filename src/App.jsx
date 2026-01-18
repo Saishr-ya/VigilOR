@@ -8,6 +8,9 @@ function App() {
     tray: null,
     incision: null
   });
+  const [videoMode, setVideoMode] = useState('camera');
+  const [videoFileUrl, setVideoFileUrl] = useState(null);
+  const [videoFile, setVideoFile] = useState(null);
 
   const handleSaveZones = (newZones) => {
     setZones(newZones);
@@ -38,9 +41,37 @@ function App() {
           <ZoneCalibration 
             initialZones={zones} 
             onSave={handleSaveZones} 
+            videoMode={videoMode}
+            videoFileUrl={videoFileUrl}
+            onVideoModeChange={setVideoMode}
+            onVideoFileChange={(file) => {
+              setVideoFile(file);
+              if (file) {
+                const url = URL.createObjectURL(file);
+                setVideoFileUrl(url);
+              } else {
+                setVideoFileUrl(null);
+              }
+            }}
           />
         ) : (
-          <LiveMonitoring zones={zones} onClosePatient={handleClosePatient} />
+          <LiveMonitoring 
+            zones={zones} 
+            onClosePatient={handleClosePatient} 
+            videoMode={videoMode}
+            videoFileUrl={videoFileUrl}
+            videoFile={videoFile}
+            onVideoModeChange={setVideoMode}
+            onVideoFileChange={(file) => {
+              setVideoFile(file);
+              if (file) {
+                const url = URL.createObjectURL(file);
+                setVideoFileUrl(url);
+              } else {
+                setVideoFileUrl(null);
+              }
+            }}
+          />
         )}
       </main>
     </div>

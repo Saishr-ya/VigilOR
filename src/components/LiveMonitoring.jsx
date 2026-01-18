@@ -13,6 +13,13 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
   const [apiError, setApiError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
   const visionRef = useRef(null);
+  const [baselineCounts, setBaselineCounts] = useState(null);
+  const [postCounts, setPostCounts] = useState(null);
+  const [scanPhase, setScanPhase] = useState(null);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanError, setScanError] = useState(null);
+  const [discrepancy, setDiscrepancy] = useState(null);
+  const [rfPredictions, setRfPredictions] = useState([]);
 
   // Update display size when video resizes
   useEffect(() => {
@@ -209,6 +216,47 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
     };
   }, [zones, externalStream]);
 
+  const handleScan = async phase => {
+    if (!videoRef.current) return;
+    setScanPhase(phase);
+    setScanLoading(true);
+    setScanError(null);
+    try {
+      const frame = captureFrameFromVideo(videoRef.current);
+      const enhancedBase64 = await enhanceFrameWithOpenCV(frame.canvas);
+      const rfResult = await runRoboflowDetection(enhancedBase64);
+      const { counts, predictions } = buildCountsFromRoboflow(rfResult);
+      setRfPredictions(predictions);
+      if (phase === 'baseline') {
+        setBaselineCounts(counts);
+        setPostCounts(null);
+        setDiscrepancy(null);
+      } else {
+        setPostCounts(counts);
+        if (baselineCounts) {
+          const diff = compareCounts(baselineCounts, counts);
+          setDiscrepancy(diff);
+        } else {
+          setDiscrepancy(null);
+        }
+      }
+    } catch (err) {
+      console.error('[LiveMonitoring] Roboflow scan error', err);
+      setScanError(err.message || String(err));
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  const hasDiscrepancy =
+    discrepancy &&
+    ((discrepancy.missing && discrepancy.missing.length > 0) ||
+      (discrepancy.extra && discrepancy.extra.length > 0));
+
+  const overshootCounts = analysisResult ? buildCountsFromOvershoot(analysisResult) : null;
+  const roboPostTotal = postCounts ? Object.values(postCounts).reduce((sum, v) => sum + v, 0) : null;
+  const overshootTotal = overshootCounts ? Object.values(overshootCounts).reduce((sum, v) => sum + v, 0) : null;
+
   return (
     <div className="flex flex-col h-[calc(100vh-140px)] gap-4">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
@@ -236,6 +284,34 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
                  </span>
                </div>
              ))}
+
+            {rfPredictions.map(pred => {
+              const left = (pred.x - pred.width / 2) * scale.x;
+              const top = (pred.y - pred.height / 2) * scale.y;
+              const width = pred.width * scale.x;
+              const height = pred.height * scale.y;
+              let color = 'border-white';
+              if (pred.class === 'scalpel') color = 'border-red-500';
+              else if (pred.class === 'scissors') color = 'border-blue-500';
+              else if (pred.class === 'clamp') color = 'border-green-500';
+              else if (pred.class === 'sponge') color = 'border-yellow-400';
+              return (
+                <div
+                  key={pred.id}
+                  className={`absolute border-2 ${color} bg-black/10`}
+                  style={{
+                    left,
+                    top,
+                    width,
+                    height,
+                  }}
+                >
+                  <span className="absolute -top-6 left-0 bg-black/80 text-white text-xs px-2 py-1">
+                    {pred.class} {(pred.confidence * 100).toFixed(0)}%
+                  </span>
+                </div>
+              );
+            })}
              
              {/* Zone Outlines */}
              {zones && (
@@ -267,6 +343,69 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
              {isProcessing ? 'Active' : 'Initializing...'}
            </div>
           </div>
+
+          <div className="flex flex-wrap items-center gap-4">
+            <button
+              onClick={() => handleScan('baseline')}
+              disabled={scanLoading}
+              className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {scanPhase === 'baseline' && scanLoading ? 'Capturing baseline...' : 'Capture Baseline Scan'}
+            </button>
+            <button
+              onClick={() => handleScan('post')}
+              disabled={scanLoading || !baselineCounts}
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {scanPhase === 'post' && scanLoading ? 'Capturing post-surgery...' : 'Capture Post-Surgery Scan'}
+            </button>
+            {baselineCounts && (
+              <div className="text-sm text-gray-600">
+                Baseline saved
+              </div>
+            )}
+          </div>
+
+          {scanError && (
+            <div className="mt-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+              Roboflow error: {scanError}
+            </div>
+          )}
+
+          {baselineCounts && postCounts && (
+            <div
+              className={`mt-4 text-sm rounded px-3 py-2 border ${
+                hasDiscrepancy
+                  ? 'bg-red-50 border-red-200 text-red-800'
+                  : 'bg-green-50 border-green-200 text-green-800'
+              }`}
+            >
+              <div className="font-semibold mb-1">
+                {hasDiscrepancy ? 'Count mismatch detected' : 'All items accounted for'}
+              </div>
+              <div className="mb-1">
+                Baseline total:{' '}
+                {Object.values(baselineCounts).reduce((sum, v) => sum + v, 0)}; Post-surgery total:{' '}
+                {Object.values(postCounts).reduce((sum, v) => sum + v, 0)}
+              </div>
+              {hasDiscrepancy && (
+                <div className="space-y-1">
+                  {discrepancy.missing &&
+                    discrepancy.missing.map(item => (
+                      <div key={`missing-${item.type}`}>
+                        {item.count} {item.type} missing
+                      </div>
+                    ))}
+                  {discrepancy.extra &&
+                    discrepancy.extra.map(item => (
+                      <div key={`extra-${item.type}`}>
+                        {item.count} extra {item.type}
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
           
           <Tally items={{ tray: trackedItems.filter(i => i.zone === 'tray'), incision: trackedItems.filter(i => i.zone === 'incision') }} />
         </div>
@@ -330,5 +469,129 @@ const CameraPreview = ({ forwardedRef, externalStream }) => {
   );
 };
 
+function captureFrameFromVideo(videoElement) {
+  const canvas = document.createElement('canvas');
+  const width = videoElement.videoWidth || videoElement.clientWidth || 1280;
+  const height = videoElement.videoHeight || videoElement.clientHeight || 720;
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(videoElement, 0, 0, width, height);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+  return { canvas, dataUrl };
+}
+
+async function enhanceFrameWithOpenCV(canvas) {
+  const cv = window.cv;
+  if (!cv) {
+    return canvas.toDataURL('image/jpeg', 0.9);
+  }
+  try {
+    const src = cv.imread(canvas);
+    const dst = new cv.Mat();
+    cv.cvtColor(src, src, cv.COLOR_RGBA2RGB);
+    const alpha = 1.5;
+    const beta = 0;
+    src.convertTo(dst, -1, alpha, beta);
+    const blurred = new cv.Mat();
+    const ksize = new cv.Size(5, 5);
+    cv.bilateralFilter(dst, blurred, 9, 75, 75);
+    cv.imshow(canvas, blurred);
+    src.delete();
+    dst.delete();
+    blurred.delete();
+    return canvas.toDataURL('image/jpeg', 0.9);
+  } catch (e) {
+    return canvas.toDataURL('image/jpeg', 0.9);
+  }
+}
+
+async function runRoboflowDetection(base64Image) {
+  const apiKey = import.meta.env.VITE_ROBOFLOW_API_KEY;
+  const workspace = import.meta.env.VITE_ROBOFLOW_WORKSPACE;
+  const workflowId = import.meta.env.VITE_ROBOFLOW_WORKFLOW_ID;
+  if (!apiKey || !workspace || !workflowId) {
+    throw new Error('Missing Roboflow configuration');
+  }
+  const url = `https://serverless.roboflow.com/${workspace}/workflows/${workflowId}`;
+  const payloadImage = base64Image.includes(',')
+    ? base64Image.split(',')[1]
+    : base64Image;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      api_key: apiKey,
+      inputs: {
+        image: {
+          type: 'base64',
+          value: payloadImage,
+        },
+      },
+    }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Roboflow error ${response.status}: ${text}`);
+  }
+  return response.json();
+}
+
+function buildCountsFromRoboflow(result) {
+  const predictionsArray =
+    result &&
+    result.outputs &&
+    result.outputs.predictions &&
+    Array.isArray(result.outputs.predictions.predictions)
+      ? result.outputs.predictions.predictions
+      : [];
+  const predictions = predictionsArray.map((p, idx) => ({
+    id: p.id || idx,
+    class: p.class || p.name || 'unknown',
+    confidence: typeof p.confidence === 'number' ? p.confidence : 0,
+    x: p.x,
+    y: p.y,
+    width: p.width,
+    height: p.height,
+  }));
+  const counts = {};
+  predictions.forEach(pred => {
+    const label = pred.class;
+    counts[label] = (counts[label] || 0) + 1;
+  });
+  return { counts, predictions };
+}
+
+function compareCounts(baseline, post) {
+  const types = new Set([...Object.keys(baseline || {}), ...Object.keys(post || {})]);
+  const missing = [];
+  const extra = [];
+  types.forEach(type => {
+    const before = baseline[type] || 0;
+    const after = post[type] || 0;
+    if (after < before) {
+      missing.push({ type, count: before - after });
+    } else if (after > before) {
+      extra.push({ type, count: after - before });
+    }
+  });
+  return { missing, extra };
+}
+
+function buildCountsFromOvershoot(analysis) {
+  if (!analysis || !Array.isArray(analysis.items)) {
+    return null;
+  }
+  const counts = {};
+  analysis.items.forEach(item => {
+    if (!item.type) {
+      return;
+    }
+    counts[item.type] = (counts[item.type] || 0) + 1;
+  });
+  return counts;
+}
 
 export default LiveMonitoring;

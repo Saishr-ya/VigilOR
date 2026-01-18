@@ -41,9 +41,14 @@ function App() {
               VigilOR
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              ai that doesnt blink
+              the AI that doesn't blink.
             </p>
           </div>
+        </div>
+        <div className="flex-1 flex justify-center">
+          <p className="text-sm sm:text-base text-slate-200 font-semibold italic">
+            Your Smart Surgery Monitor
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300 border border-emerald-500/30">

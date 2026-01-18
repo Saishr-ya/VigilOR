@@ -1042,9 +1042,11 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
           />
         </div>
 
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 justify-center h-full">
           <SafetyLock incisionCount={incisionCount} onLock={onClosePatient} />
-          <EventLog events={events} />
+          {videoMode === 'camera' && (
+            <EventLog events={events} />
+          )}
         </div>
       </div>
       {apiError && (

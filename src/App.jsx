@@ -44,11 +44,14 @@ function App() {
           >
             <div className="absolute inset-0 bg-gradient-to-br from-sky-500/25 via-emerald-400/15 to-cyan-300/20 opacity-80" />
             <div className="relative z-10 flex items-center justify-center">
-              <div className="w-7 h-7 rounded-full border border-sky-300/70 flex items-center justify-center">
-                <div className="w-3.5 h-3.5 rounded-full border border-sky-200/80 flex items-center justify-center">
-                  <div className="w-1.5 h-1.5 rounded-full bg-sky-300" />
-                </div>
-              </div>
+              {/* Clean Eye Icon */}
+              <svg className="w-7 h-7 text-sky-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                {/* Eye outline */}
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                {/* Iris/Pupil */}
+                <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.7" />
+                <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+              </svg>
             </div>
           </div>
           <div>

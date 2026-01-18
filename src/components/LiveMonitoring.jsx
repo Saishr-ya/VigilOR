@@ -229,11 +229,13 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
       const rfResult = await runRoboflowDetection(enhancedBase64);
       const { counts, predictions } = buildCountsFromRoboflow(rfResult);
       setRfPredictions(predictions);
+
       const scanCounts = trackedItems.reduce((acc, item) => {
         const label = item.type || 'unknown';
         acc[label] = (acc[label] || 0) + 1;
         return acc;
       }, {});
+
       if (phase === 'baseline') {
         setBaselineCounts(scanCounts);
         setPostCounts(null);
@@ -294,7 +296,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
     }
     const incisionItemsNow = trackedItems.filter(i => i.zone === 'incision');
     setShowIncisionPopup(incisionItemsNow.length > 0);
-  }, [postScanVersion]);
+  }, [postScanVersion, scanPhase]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-140px)] gap-4">
@@ -351,10 +353,14 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
              ))}
 
             {rfPredictions.map(pred => {
-              const left = (pred.x - pred.width / 2) * scale.x;
-              const top = (pred.y - pred.height / 2) * scale.y;
-              const width = pred.width * scale.x;
-              const height = pred.height * scale.y;
+              const baseWidth = 640;
+              const baseHeight = 480;
+              const scaleX = displaySize.width / baseWidth;
+              const scaleY = displaySize.height / baseHeight;
+              const left = (pred.x - pred.width / 2) * scaleX;
+              const top = (pred.y - pred.height / 2) * scaleY;
+              const width = pred.width * scaleX;
+              const height = pred.height * scaleY;
               let color = 'border-white';
               if (pred.class === 'scalpel') color = 'border-red-500';
               else if (pred.class === 'scissors') color = 'border-blue-500';
@@ -438,43 +444,41 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
           )}
 
           {baselineCounts && postCounts && (
-            <>
-              <div
-                className={`mt-4 text-sm rounded px-3 py-2 border ${
-                  allItemsAccountedFor
-                    ? 'bg-green-50 border-green-200 text-green-800'
-                    : 'bg-red-50 border-red-200 text-red-800'
-                }`}
-              >
-                <div className="font-semibold mb-1">
-                  {hasRetainedInIncision
-                    ? 'Items still in incision zone'
-                    : hasDiscrepancy
-                      ? 'Count mismatch detected'
-                      : 'All items accounted for'}
-                </div>
-                <div className="mb-1">
-                  Baseline total:{' '}
-                  {Object.values(baselineCounts).reduce((sum, v) => sum + v, 0)}; Post-surgery total:{' '}
-                  {Object.values(postCounts).reduce((sum, v) => sum + v, 0)}
-                </div>
-                {hasDiscrepancy && (
-                  <div className="space-y-1">
-                    {discrepancy.missing &&
-                      discrepancy.missing.map(item => (
-                        <div key={`missing-${item.type}`}>
-                          {item.count} {item.type} missing
-                        </div>
-                      ))}
-                    {discrepancy.extra &&
-                      discrepancy.extra.map(item => (
-                        <div key={`extra-${item.type}`}>
-                          {item.count} extra {item.type}
-                        </div>
-                      ))}
-                  </div>
-                )}
+            <div
+              className={`mt-4 text-sm rounded px-3 py-2 border ${
+                hasRetainedInIncision || hasDiscrepancy
+                  ? 'bg-red-50 border-red-200 text-red-800'
+                  : 'bg-green-50 border-green-200 text-green-800'
+              }`}
+            >
+              <div className="font-semibold mb-1">
+                {hasRetainedInIncision
+                  ? 'Items still in incision zone'
+                  : hasDiscrepancy
+                    ? 'Count mismatch detected'
+                    : 'All items accounted for'}
               </div>
+              <div className="mb-1">
+                Baseline total:{' '}
+                {Object.values(baselineCounts).reduce((sum, v) => sum + v, 0)}; Post-surgery total:{' '}
+                {Object.values(postCounts).reduce((sum, v) => sum + v, 0)}
+              </div>
+              {hasDiscrepancy && (
+                <div className="space-y-1">
+                  {discrepancy.missing &&
+                    discrepancy.missing.map(item => (
+                      <div key={`missing-${item.type}`}>
+                        {item.count} {item.type} missing
+                      </div>
+                    ))}
+                  {discrepancy.extra &&
+                    discrepancy.extra.map(item => (
+                      <div key={`extra-${item.type}`}>
+                        {item.count} extra {item.type}
+                      </div>
+                    ))}
+                </div>
+              )}
               {hasRetainedInIncision && (
                 <div className="mt-3 text-sm rounded px-3 py-2 border bg-red-50 border-red-200 text-red-800">
                   <div className="font-semibold mb-1">
@@ -489,7 +493,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
                   </div>
                 </div>
               )}
-            </>
+            </div>
           )}
           
           <Tally items={{ tray: trackedItems.filter(i => i.zone === 'tray'), incision: trackedItems.filter(i => i.zone === 'incision') }} />

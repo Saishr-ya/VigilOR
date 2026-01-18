@@ -26,7 +26,10 @@ function App() {
     <div className="min-h-screen bg-slate-950 text-slate-50 px-8 py-6">
       <header className="mb-8 flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-2xl bg-slate-950 border border-sky-500/60 shadow-lg flex items-center justify-center relative overflow-hidden">
+          <div 
+            onClick={() => setMode('calibration')}
+            className="h-9 w-9 rounded-2xl bg-slate-950 border border-sky-500/60 shadow-lg flex items-center justify-center relative overflow-hidden cursor-pointer hover:border-sky-400 transition-colors"
+          >
             <div className="absolute inset-0 bg-gradient-to-br from-sky-500/25 via-emerald-400/15 to-cyan-300/20 opacity-80" />
             <div className="relative z-10 flex items-center justify-center">
               <div className="w-7 h-7 rounded-full border border-sky-300/70 flex items-center justify-center">

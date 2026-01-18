@@ -3,6 +3,7 @@ import { RealtimeVision } from '@overshoot/sdk';
 import { Lock, Unlock } from 'lucide-react';
 import Tally from './Tally';
 import { useItemTracking } from '../hooks/useItemTracking';
+import { useMetrics } from '../hooks/useMetrics';
 
 const ROBOFLOW_VALIDATION_INTERVAL_MINUTES = 2;
 const ROBOFLOW_TRACKING_INTERVAL_MS = 2500;
@@ -118,10 +119,39 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   }, []);
 
   const { trackedItems, counts } = useItemTracking(analysisResult);
+  const { currentSession, startSession, endSession, logEvent, logItemDetection, logItemInPatient, logSafetyAlert, logDiscrepancy } = useMetrics();
 
   useEffect(() => {
     trackedItemsRef.current = trackedItems;
   }, [trackedItems]);
+
+  // Track item movements and zone changes
+  useEffect(() => {
+    if (!currentSession || trackedItems.length === 0) return;
+
+    // Log current item distribution
+    const trayItems = trackedItems.filter(item => item.zone === 'tray').length;
+    const incisionItems = trackedItems.filter(item => item.zone === 'incision').length;
+    
+    logItemInPatient(incisionItems);
+    
+    // Log individual item movements
+    trackedItems.forEach(item => {
+      if (item.zone === 'incision') {
+        logEvent('item_moved_to_incision', { 
+          itemType: item.type, 
+          x: item.x, 
+          y: item.y 
+        });
+      } else if (item.zone === 'tray') {
+        logEvent('item_moved_to_tray', { 
+          itemType: item.type, 
+          x: item.x, 
+          y: item.y 
+        });
+      }
+    });
+  }, [trackedItems, currentSession, logItemInPatient, logEvent]);
 
   useEffect(() => {
     if (videoMode !== 'camera') {
@@ -158,6 +188,15 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
 
     if (!zones || !zones.tray || !zones.incision) {
       return;
+    }
+
+    // Start a new session when zones are configured
+    if (!currentSession) {
+      startSession({
+        zones: zones,
+        videoMode: videoMode,
+        startTime: new Date().toISOString()
+      });
     }
 
     const video = videoRef.current;
@@ -470,6 +509,16 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
         if (baselineCounts) {
           const diff = compareCounts(baselineCounts, scanCounts);
           setDiscrepancy(diff);
+          
+          // Log discrepancy if detected
+          if (currentSession && diff && (diff.missing?.length > 0 || diff.extra?.length > 0)) {
+            logDiscrepancy('item_count_mismatch', 'baseline_vs_post', {
+              missing: diff.missing,
+              extra: diff.extra,
+              baselineCounts: baselineCounts,
+              postCounts: scanCounts
+            });
+          }
         } else {
           setDiscrepancy(null);
         }
@@ -765,6 +814,16 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   }, {});
   const hasRetainedInIncision = incisionCount > 0;
 
+  // Log safety alerts when items are detected in incision
+  useEffect(() => {
+    if (currentSession && incisionCount > 0) {
+      logSafetyAlert('items_in_incision', { 
+        count: incisionCount, 
+        items: trackedItems.filter(item => item.zone === 'incision').map(item => item.type)
+      });
+    }
+  }, [incisionCount, currentSession, logSafetyAlert, trackedItems]);
+
   return (
     <div className="flex flex-col h-[calc(100vh-140px)] gap-4 text-slate-100">
       {showIncisionPopup && (
@@ -814,6 +873,10 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               <button
                 onClick={() => {
                   setShowCloseConfirm(false);
+                  // End the current session and log final metrics
+                  if (currentSession) {
+                    endSession();
+                  }
                   onClosePatient();
                 }}
                 className="px-4 py-2 rounded-lg bg-sky-500 text-slate-950 text-sm font-medium hover:bg-sky-400"

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 const MATCH_THRESHOLD = 0.08;
 const MERGE_THRESHOLD = 0.08;
 const ZONE_STABLE_FRAMES = 2;
-const ITEM_STALE_MS = 300;
+const ITEM_STALE_MS = 2000;
 
 export const useItemTracking = (analysisResult) => {
   const [trackedItems, setTrackedItems] = useState([]);

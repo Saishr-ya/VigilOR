@@ -5,7 +5,10 @@ import SafetyLock from './SafetyLock';
 import EventLog from './EventLog';
 import { useItemTracking } from '../hooks/useItemTracking';
 
-const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, videoFileUrl, onVideoModeChange, onVideoFileChange }) => {
+const ROBOFLOW_VALIDATION_INTERVAL_MINUTES = 2;
+const ROBOFLOW_TRACKING_INTERVAL_MS = 2500;
+
+const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, videoFileUrl, videoFile, onVideoModeChange, onVideoFileChange }) => {
   const videoRef = useRef(null);
   const [displaySize, setDisplaySize] = useState({ width: 1, height: 1 });
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -25,7 +28,18 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   const [rfPredictions, setRfPredictions] = useState([]);
   const [dynamicZones, setDynamicZones] = useState(zones);
   const dynamicZonesRef = useRef(zones);
+  const [baselineObjectHints, setBaselineObjectHints] = useState(null);
   const zoneTemplatesRef = useRef({ tray: null, incision: null });
+  const trackedItemsRef = useRef([]);
+
+  const handleVideoFileChange = event => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) {
+      return;
+    }
+    onVideoFileChange(file);
+    onVideoModeChange('file');
+  };
 
   const videoElementForScale = videoRef.current;
   const sourceWidth =
@@ -101,6 +115,10 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   const { trackedItems, events, counts } = useItemTracking(analysisResult);
 
   useEffect(() => {
+    trackedItemsRef.current = trackedItems;
+  }, [trackedItems]);
+
+  useEffect(() => {
     const apiKey = import.meta.env.VITE_OVERSHOOT_API_KEY;
     const baseUrl = import.meta.env.VITE_OVERSHOOT_BASE_URL || "https://cluster1.overshoot.ai/api/v0.2";
 
@@ -132,31 +150,42 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
     };
 
     const prompt = [
-      "Identify all clearly visible objects (surgical instruments, bottles, phones, etc).",
-      "For each object, return:",
-      "- type: short label (e.g. bottle, sponge, scissors)",
+      "Identify all clearly visible surgical instruments (scissor, retractor, mallet, elevator, forceps, syringe).",
+      "For each instrument, return:",
+      "- type: short label",
       "- x: center x pixel",
       "- y: center y pixel",
       "",
       `Tray bounds: x1=${tray.x1}, x2=${tray.x2}, y1=${tray.y1}, y2=${tray.y2}.`,
       `Incision bounds: x1=${incision.x1}, x2=${incision.x2}, y1=${incision.y1}, y2=${incision.y2}.`,
       "",
-      "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number, \"zone\": \"tray\" | \"incision\" | null}] }"
+      "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number}] }"
     ].join(" ");
 
+    let sourceConfig = null;
     if (videoMode === 'file') {
       setSnapshotMode(true);
-      return undefined;
+      if (!videoFile) {
+        console.warn("[LiveMonitoring] videoMode is file but no videoFile provided");
+        return;
+      }
+      sourceConfig = {
+        type: 'video',
+        file: videoFile
+      };
+    } else {
+      setSnapshotMode(false);
+      sourceConfig = {
+        type: 'camera'
+      };
     }
-
-    setSnapshotMode(false);
 
     const config = {
       apiUrl: baseUrl,
       apiKey: apiKey,
       prompt: prompt,
       model: 'Qwen/Qwen3-VL-30B-A3B-Instruct',
-      source: externalStream || undefined,
+      source: sourceConfig,
       outputSchema: {
         type: 'object',
         properties: {
@@ -167,23 +196,39 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
               properties: {
                 type: { type: 'string' },
                 x: { type: 'number' },
-                y: { type: 'number' },
-                zone: { type: 'string', enum: ['tray', 'incision', null] }
+                y: { type: 'number' }
               }
             }
-          },
-          tray_count: { type: 'number' },
-          incision_count: { type: 'number' }
+          }
         }
       },
       onResult: (result) => {
-        setIsProcessing(true);
         try {
-          let parsed;
-          if (typeof result.result === 'string') {
-            parsed = JSON.parse(result.result);
+          let parsed = null;
+          const raw = result && result.result;
+
+          if (raw == null) {
+            return;
+          }
+
+          if (typeof raw === 'object') {
+            parsed = raw;
+          } else if (typeof raw === 'string') {
+            const trimmed = raw.trim();
+            if (!trimmed) {
+              return;
+            }
+            if (!((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')))) {
+              return;
+            }
+            try {
+              parsed = JSON.parse(trimmed);
+            } catch (e) {
+              console.warn("[LiveMonitoring] Skipping non-JSON chunk from Overshoot", e);
+              return;
+            }
           } else {
-            parsed = result.result;
+            return;
           }
 
           console.log("[LiveMonitoring] Vision Result:", parsed);
@@ -203,8 +248,15 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
             const x = typeof item.x === 'number' ? item.x : 0;
             const y = typeof item.y === 'number' ? item.y : 0;
 
-            const xNorm = w ? x / w : 0;
-            const yNorm = h ? y / h : 0;
+            let xNorm;
+            let yNorm;
+            if (x <= 1 && y <= 1) {
+              xNorm = x;
+              yNorm = y;
+            } else {
+              xNorm = w ? x / w : 0;
+              yNorm = h ? y / h : 0;
+            }
 
             const trayMarginX = 0.02;
             const trayMarginY = 0.02;
@@ -240,8 +292,8 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
 
           setAnalysisResult({
             items: normalizedItems,
-            tray_count: parsed.tray_count || 0,
-            incision_count: parsed.incision_count || 0
+            tray_count: normalizedItems.filter(i => i.zone === 'tray').length,
+            incision_count: normalizedItems.filter(i => i.zone === 'incision').length
           });
           setApiError(null);
         } catch (e) {
@@ -254,17 +306,23 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
 
     visionRef.current = vision;
 
-    vision.start().catch(err => {
-      console.error("[LiveMonitoring] Failed to start vision", err);
-      setApiError(err.message);
-    });
+    vision.start()
+      .then(() => {
+        setIsProcessing(true);
+      })
+      .catch(err => {
+        console.error("[LiveMonitoring] Failed to start vision", err);
+        setApiError(err.message);
+        setIsProcessing(false);
+      });
 
     return () => {
       if (visionRef.current) {
         visionRef.current.stop();
       }
+      setIsProcessing(false);
     };
-  }, [zones, externalStream, videoMode]);
+  }, [zones, videoMode, videoFile]);
 
   const handleScan = async phase => {
     if (!videoRef.current) return;
@@ -281,16 +339,72 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
       console.log('[LiveMonitoring] Roboflow predictions:', predictions);
       setRfPredictions(predictions);
 
-      const scanCounts = trackedItems.reduce((acc, item) => {
-        const label = item.type || 'unknown';
-        acc[label] = (acc[label] || 0) + 1;
-        return acc;
-      }, {});
+      const video = videoRef.current;
+      const width = video ? (video.videoWidth || video.clientWidth || 1280) : 1280;
+      const height = video ? (video.videoHeight || video.clientHeight || 720) : 720;
+
+      const zonesForClassification = dynamicZones || zones;
+      let trayZoneCount = 0;
+      let incisionZoneCount = 0;
+
+      const itemsFromRoboflow = predictions.map(pred => {
+        const xCenter = typeof pred.x === 'number' ? pred.x : 0;
+        const yCenter = typeof pred.y === 'number' ? pred.y : 0;
+        const xNorm = width ? xCenter / width : 0;
+        const yNorm = height ? yCenter / height : 0;
+
+        let zone = null;
+        if (zonesForClassification && zonesForClassification.tray && zonesForClassification.incision) {
+          const trayMarginX = 0.02;
+          const trayMarginY = 0.02;
+          const incisionMarginX = 0.05;
+          const incisionMarginY = 0.05;
+
+          const trayX1 = Math.max(0, zonesForClassification.tray.x1 - trayMarginX);
+          const trayX2 = Math.min(1, zonesForClassification.tray.x2 + trayMarginX);
+          const trayY1 = Math.max(0, zonesForClassification.tray.y1 - trayMarginY);
+          const trayY2 = Math.min(1, zonesForClassification.tray.y2 + trayMarginY);
+
+          const incisionX1 = Math.max(0, zonesForClassification.incision.x1 - incisionMarginX);
+          const incisionX2 = Math.min(1, zonesForClassification.incision.x2 + incisionMarginX);
+          const incisionY1 = Math.max(0, zonesForClassification.incision.y1 - incisionMarginY);
+          const incisionY2 = Math.min(1, zonesForClassification.incision.y2 + incisionMarginY);
+
+          const inTray = xNorm >= trayX1 && xNorm <= trayX2 &&
+                         yNorm >= trayY1 && yNorm <= trayY2;
+          const inIncision = xNorm >= incisionX1 && xNorm <= incisionX2 &&
+                             yNorm >= incisionY1 && yNorm <= incisionY2;
+
+          if (inIncision) {
+            zone = 'incision';
+            incisionZoneCount += 1;
+          } else if (inTray) {
+            zone = 'tray';
+            trayZoneCount += 1;
+          }
+        }
+
+        return {
+          type: pred.class || pred.name || 'unknown',
+          x: xNorm,
+          y: yNorm,
+          zone
+        };
+      });
+
+      setAnalysisResult({
+        items: itemsFromRoboflow,
+        tray_count: trayZoneCount,
+        incision_count: incisionZoneCount
+      });
+
+      const scanCounts = counts || {};
 
       if (phase === 'baseline') {
         setBaselineCounts(scanCounts);
         setPostCounts(null);
         setDiscrepancy(null);
+        setBaselineObjectHints(itemsFromRoboflow);
       } else {
         setPostCounts(scanCounts);
         if (baselineCounts) {
@@ -305,8 +419,245 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
       setScanError(err.message || String(err));
     } finally {
       setScanLoading(false);
+      const video = videoRef.current;
+      if (video && video.paused) {
+        video.play().catch(() => {});
+      }
     }
   };
+
+  useEffect(() => {
+    if (!baselineCounts) {
+      return;
+    }
+    if (!videoRef.current) {
+      return;
+    }
+    if (videoMode !== 'camera') {
+      return;
+    }
+    const intervalMs = ROBOFLOW_VALIDATION_INTERVAL_MINUTES * 60 * 1000;
+    let cancelled = false;
+
+    const runValidation = async () => {
+      if (cancelled) {
+        return;
+      }
+      if (!videoRef.current) {
+        return;
+      }
+      try {
+        const frame = captureFrameFromVideo(videoRef.current);
+        const enhancedBase64 = await enhanceFrameWithOpenCV(frame.canvas);
+        const rfResult = await runRoboflowDetection(enhancedBase64);
+        const { counts, predictions } = buildCountsFromRoboflow(rfResult);
+
+        const video = videoRef.current;
+        const width = video ? (video.videoWidth || video.clientWidth || 1280) : 1280;
+        const height = video ? (video.videoHeight || video.clientHeight || 720) : 720;
+
+        const zonesForClassification = dynamicZones || zones;
+        let trayZoneCount = 0;
+        let incisionZoneCount = 0;
+
+        const itemsFromRoboflow = predictions.map(pred => {
+          const xCenter = typeof pred.x === 'number' ? pred.x : 0;
+          const yCenter = typeof pred.y === 'number' ? pred.y : 0;
+          const xNorm = width ? xCenter / width : 0;
+          const yNorm = height ? yCenter / height : 0;
+
+          let zone = null;
+          if (zonesForClassification && zonesForClassification.tray && zonesForClassification.incision) {
+            const trayMarginX = 0.02;
+            const trayMarginY = 0.02;
+            const incisionMarginX = 0.05;
+            const incisionMarginY = 0.05;
+
+            const trayX1 = Math.max(0, zonesForClassification.tray.x1 - trayMarginX);
+            const trayX2 = Math.min(1, zonesForClassification.tray.x2 + trayMarginX);
+            const trayY1 = Math.max(0, zonesForClassification.tray.y1 - trayMarginY);
+            const trayY2 = Math.min(1, zonesForClassification.tray.y2 + trayMarginY);
+
+            const incisionX1 = Math.max(0, zonesForClassification.incision.x1 - incisionMarginX);
+            const incisionX2 = Math.min(1, zonesForClassification.incision.x2 + incisionMarginX);
+            const incisionY1 = Math.max(0, zonesForClassification.incision.y1 - incisionMarginY);
+            const incisionY2 = Math.min(1, zonesForClassification.incision.y2 + incisionMarginY);
+
+            const inTray = xNorm >= trayX1 && xNorm <= trayX2 &&
+                           yNorm >= trayY1 && yNorm <= trayY2;
+            const inIncision = xNorm >= incisionX1 && xNorm <= incisionX2 &&
+                               yNorm >= incisionY1 && yNorm <= incisionY2;
+
+            if (inIncision) {
+              zone = 'incision';
+              incisionZoneCount += 1;
+            } else if (inTray) {
+              zone = 'tray';
+              trayZoneCount += 1;
+            }
+          }
+
+          return {
+            type: pred.class || pred.name || 'unknown',
+            x: xNorm,
+            y: yNorm,
+            zone
+          };
+        });
+
+        const currentTracked = trackedItemsRef.current || [];
+        const matchThreshold = 0.08;
+
+        const unmatchedDetections = itemsFromRoboflow.filter(det => {
+          return !currentTracked.some(item => {
+            if (item.type !== det.type) {
+              return false;
+            }
+            const dx = item.x - det.x;
+            const dy = item.y - det.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            return dist < matchThreshold;
+          });
+        });
+
+        let hasCountMismatch = false;
+        const overshootCountsNow = currentTracked.reduce((acc, item) => {
+          if (item.zone === 'tray') {
+            acc.tray = (acc.tray || 0) + 1;
+          }
+          if (item.zone === 'incision') {
+            acc.incision = (acc.incision || 0) + 1;
+          }
+          return acc;
+        }, { tray: 0, incision: 0 });
+
+        const roboTotal = Object.values(counts || {}).reduce((sum, v) => sum + v, 0);
+        const overshootTotalNow = overshootCountsNow.tray + overshootCountsNow.incision;
+        hasCountMismatch = roboTotal !== overshootTotalNow;
+
+        if (unmatchedDetections.length > 0 || hasCountMismatch) {
+          setAnalysisResult({
+            items: itemsFromRoboflow,
+            tray_count: trayZoneCount,
+            incision_count: incisionZoneCount
+          });
+        }
+      } catch (err) {
+        console.error('[LiveMonitoring] Roboflow periodic validation error', err);
+      }
+    };
+
+    const id = setInterval(runValidation, intervalMs);
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [baselineCounts, dynamicZones, zones, videoMode]);
+
+  useEffect(() => {
+    if (videoMode !== 'file') {
+      return;
+    }
+    let cancelled = false;
+    let inFlight = false;
+
+    const runTracking = async () => {
+      if (cancelled) {
+        return;
+      }
+      if (!videoRef.current) {
+        setTimeout(runTracking, ROBOFLOW_TRACKING_INTERVAL_MS);
+        return;
+      }
+       if (inFlight) {
+         setTimeout(runTracking, ROBOFLOW_TRACKING_INTERVAL_MS);
+         return;
+       }
+      try {
+        const video = videoRef.current;
+        if (!video || video.paused || video.ended) {
+          setTimeout(runTracking, ROBOFLOW_TRACKING_INTERVAL_MS);
+          return;
+        }
+        inFlight = true;
+        const frame = captureFrameFromVideo(video);
+        const rfResult = await runRoboflowDetection(frame.dataUrl);
+        const { counts, predictions } = buildCountsFromRoboflow(rfResult);
+
+        const width = video ? (video.videoWidth || video.clientWidth || 1280) : 1280;
+        const height = video ? (video.videoHeight || video.clientHeight || 720) : 720;
+
+        const zonesForClassification = dynamicZones || zones;
+        let trayZoneCount = 0;
+        let incisionZoneCount = 0;
+
+        const itemsFromRoboflow = predictions.map(pred => {
+          const xCenter = typeof pred.x === 'number' ? pred.x : 0;
+          const yCenter = typeof pred.y === 'number' ? pred.y : 0;
+          const xNorm = width ? xCenter / width : 0;
+          const yNorm = height ? yCenter / height : 0;
+
+          let zone = null;
+          if (zonesForClassification && zonesForClassification.tray && zonesForClassification.incision) {
+            const trayMarginX = 0.02;
+            const trayMarginY = 0.02;
+            const incisionMarginX = 0.05;
+            const incisionMarginY = 0.05;
+
+            const trayX1 = Math.max(0, zonesForClassification.tray.x1 - trayMarginX);
+            const trayX2 = Math.min(1, zonesForClassification.tray.x2 + trayMarginX);
+            const trayY1 = Math.max(0, zonesForClassification.tray.y1 - trayMarginY);
+            const trayY2 = Math.min(1, zonesForClassification.tray.y2 + trayMarginY);
+
+            const incisionX1 = Math.max(0, zonesForClassification.incision.x1 - incisionMarginX);
+            const incisionX2 = Math.min(1, zonesForClassification.incision.x2 + incisionMarginX);
+            const incisionY1 = Math.max(0, zonesForClassification.incision.y1 - incisionMarginY);
+            const incisionY2 = Math.min(1, zonesForClassification.incision.y2 + incisionMarginY);
+
+            const inTray = xNorm >= trayX1 && xNorm <= trayX2 &&
+                           yNorm >= trayY1 && yNorm <= trayY2;
+            const inIncision = xNorm >= incisionX1 && xNorm <= incisionX2 &&
+                               yNorm >= incisionY1 && yNorm <= incisionY2;
+
+            if (inIncision) {
+              zone = 'incision';
+              incisionZoneCount += 1;
+            } else if (inTray) {
+              zone = 'tray';
+              trayZoneCount += 1;
+            }
+          }
+
+          return {
+            type: pred.class || pred.name || 'unknown',
+            x: xNorm,
+            y: yNorm,
+            zone
+          };
+        });
+
+        setAnalysisResult({
+          items: itemsFromRoboflow,
+          tray_count: trayZoneCount,
+          incision_count: incisionZoneCount
+        });
+      } catch (err) {
+        console.error('[LiveMonitoring] Roboflow tracking error', err);
+      } finally {
+        inFlight = false;
+        if (!cancelled) {
+          setTimeout(runTracking, ROBOFLOW_TRACKING_INTERVAL_MS);
+        }
+      }
+    };
+
+    runTracking();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [videoMode, videoFileUrl, dynamicZones, zones]);
 
   const hasDiscrepancy =
     discrepancy &&
@@ -316,6 +667,17 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   const overshootCounts = analysisResult ? buildCountsFromOvershoot(analysisResult) : null;
   const roboPostTotal = postCounts ? Object.values(postCounts).reduce((sum, v) => sum + v, 0) : null;
   const overshootTotal = overshootCounts ? Object.values(overshootCounts).reduce((sum, v) => sum + v, 0) : null;
+
+  const incisionCount = counts.incision || 0;
+  const incisionItems = trackedItems.filter(item => item.zone === 'incision');
+  const incisionSummaryByType = incisionItems.reduce((acc, item) => {
+    if (!item.type) {
+      return acc;
+    }
+    acc[item.type] = (acc[item.type] || 0) + 1;
+    return acc;
+  }, {});
+  const hasRetainedInIncision = incisionCount > 0;
 
   return (
     <div className="flex flex-col h-[calc(100vh-140px)] gap-4">
@@ -403,20 +765,23 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
                </div>
              ))}
 
-            {rfPredictions.map(pred => {
-              const baseWidth = 640;
-              const baseHeight = 480;
-              const scaleX = displaySize.width / baseWidth;
-              const scaleY = displaySize.height / baseHeight;
+            {videoMode === 'file' && rfPredictions.map(pred => {
+              const currentVideo = videoRef.current;
+              const baseWidth = currentVideo ? (currentVideo.videoWidth || currentVideo.clientWidth || 640) : 640;
+              const baseHeight = currentVideo ? (currentVideo.videoHeight || currentVideo.clientHeight || 480) : 480;
+              const scaleX = baseWidth ? displaySize.width / baseWidth : 1;
+              const scaleY = baseHeight ? displaySize.height / baseHeight : 1;
               const left = (pred.x - pred.width / 2) * scaleX;
               const top = (pred.y - pred.height / 2) * scaleY;
               const width = pred.width * scaleX;
               const height = pred.height * scaleY;
               let color = 'border-white';
-              if (pred.class === 'scalpel') color = 'border-red-500';
-              else if (pred.class === 'scissors') color = 'border-blue-500';
-              else if (pred.class === 'clamp') color = 'border-green-500';
-              else if (pred.class === 'sponge') color = 'border-yellow-400';
+              if (pred.class === 'scissor') color = 'border-blue-500';
+              else if (pred.class === 'retractor') color = 'border-green-500';
+              else if (pred.class === 'mallet') color = 'border-yellow-400';
+              else if (pred.class === 'elevator') color = 'border-purple-500';
+              else if (pred.class === 'forceps') color = 'border-pink-500';
+              else if (pred.class === 'syringe') color = 'border-red-500';
               return (
                 <div
                   key={pred.id}
@@ -583,7 +948,6 @@ const CameraPreview = ({ forwardedRef, externalStream, videoFileUrl, videoMode }
     if (videoMode === 'file' && videoFileUrl && video) {
       video.srcObject = null;
       video.src = videoFileUrl;
-      video.play().catch(() => {});
       return () => {};
     }
 
@@ -616,8 +980,7 @@ const CameraPreview = ({ forwardedRef, externalStream, videoFileUrl, videoMode }
 
   return (
     <video 
-      ref={forwardedRef} 
-      autoPlay 
+      ref={forwardedRef}
       playsInline 
       muted 
       className="w-full h-auto block"
@@ -820,15 +1183,21 @@ function buildCountsFromRoboflow(result) {
   } else if (result && Array.isArray(result.predictions)) {
     predictionsArray = result.predictions;
   }
-  const predictions = predictionsArray.map((p, idx) => ({
-    id: p.id || idx,
-    class: p.class || p.name || 'unknown',
-    confidence: typeof p.confidence === 'number' ? p.confidence : 0,
-    x: p.x,
-    y: p.y,
-    width: p.width,
-    height: p.height,
-  }));
+
+  const allowedClasses = ['scissor', 'retractor', 'mallet', 'elevator', 'forceps', 'syringe'];
+  const minConfidence = 0.7;
+
+  const predictions = predictionsArray
+    .map((p, idx) => ({
+      id: p.id || idx,
+      class: p.class || p.name || 'unknown',
+      confidence: typeof p.confidence === 'number' ? p.confidence : 0,
+      x: p.x,
+      y: p.y,
+      width: p.width,
+      height: p.height,
+    }))
+    .filter(p => allowedClasses.includes(p.class) && p.confidence >= minConfidence);
   const counts = {};
   predictions.forEach(pred => {
     const label = pred.class;

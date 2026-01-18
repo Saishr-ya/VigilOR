@@ -10,6 +10,7 @@ function App() {
   });
   const [videoMode, setVideoMode] = useState('camera');
   const [videoFileUrl, setVideoFileUrl] = useState(null);
+  const [videoFile, setVideoFile] = useState(null);
 
   const handleSaveZones = (newZones) => {
     setZones(newZones);
@@ -43,7 +44,15 @@ function App() {
             videoMode={videoMode}
             videoFileUrl={videoFileUrl}
             onVideoModeChange={setVideoMode}
-            onVideoFileChange={setVideoFileUrl}
+            onVideoFileChange={(file) => {
+              setVideoFile(file);
+              if (file) {
+                const url = URL.createObjectURL(file);
+                setVideoFileUrl(url);
+              } else {
+                setVideoFileUrl(null);
+              }
+            }}
           />
         ) : (
           <LiveMonitoring 
@@ -51,8 +60,17 @@ function App() {
             onClosePatient={handleClosePatient} 
             videoMode={videoMode}
             videoFileUrl={videoFileUrl}
+            videoFile={videoFile}
             onVideoModeChange={setVideoMode}
-            onVideoFileChange={setVideoFileUrl}
+            onVideoFileChange={(file) => {
+              setVideoFile(file);
+              if (file) {
+                const url = URL.createObjectURL(file);
+                setVideoFileUrl(url);
+              } else {
+                setVideoFileUrl(null);
+              }
+            }}
           />
         )}
       </main>

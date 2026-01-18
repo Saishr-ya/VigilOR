@@ -88,8 +88,7 @@ const ZoneCalibration = ({ onSave, initialZones, videoMode, videoFileUrl, onVide
     if (!file) {
       return;
     }
-    const url = URL.createObjectURL(file);
-    onVideoFileChange(url);
+    onVideoFileChange(file);
     onVideoModeChange('file');
   };
 

@@ -323,7 +323,16 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
         </div>
       )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
-        <div className="lg:col-span-2 flex flex-col gap-6">
+        <div className="lg:col-span-3 flex flex-col gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2">
+              <Tally items={{ tray: trackedItems.filter(i => i.zone === 'tray'), incision: trackedItems.filter(i => i.zone === 'incision') }} />
+            </div>
+            <div className="lg:col-span-1">
+              <SafetyLock incisionCount={counts.incision} onLock={onClosePatient} />
+            </div>
+          </div>
+
           <div className="bg-black rounded-lg overflow-hidden shadow-lg relative">
            <CameraPreview forwardedRef={videoRef} externalStream={externalStream} />
            
@@ -338,22 +347,26 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
                
                return (
                  <div 
-                   key={item.id}
-                   className={`absolute border-2 shadow-sm transition-all duration-300 ${
-                     item.zone === 'incision' ? 'border-red-500 bg-red-500/10' : 'border-green-500 bg-green-500/10'
-                   }`}
-                   style={{ 
-                     left: centerX - objectWidth / 2, 
-                     top: centerY - objectHeight / 2,
-                     width: objectWidth,
-                     height: objectHeight,
-                     opacity: (Date.now() - item.lastSeen) > 300 ? 0.5 : 1
-                   }}
-                 >
-                   <span className="absolute -bottom-6 left-0 right-0 text-center bg-black/70 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
-                     {item.type}
-                   </span>
-                 </div>
+                 key={item.id}
+                 className="absolute transition-all duration-300"
+                 style={{ 
+                   left: centerX - objectWidth / 2, 
+                   top: centerY - objectHeight / 2,
+                   width: objectWidth,
+                   height: objectHeight,
+                   opacity: (Date.now() - item.lastSeen) > 300 ? 0.5 : 1
+                 }}
+               >
+                 <span className={`absolute -top-6 left-0 right-0 text-center text-xs px-2 py-1 rounded whitespace-nowrap ${
+                   item.zone === 'incision' 
+                     ? 'bg-red-500/50 text-white' 
+                     : item.zone === 'tray' 
+                       ? 'bg-green-500/50 text-white' 
+                       : 'bg-black/70 text-white'
+                 }`}>
+                   {item.type}
+                 </span>
+               </div>
                );
              })}
 
@@ -500,13 +513,6 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
               )}
             </div>
           )}
-          
-          <Tally items={{ tray: trackedItems.filter(i => i.zone === 'tray'), incision: trackedItems.filter(i => i.zone === 'incision') }} />
-        </div>
-
-        <div className="flex flex-col gap-6">
-          <SafetyLock incisionCount={counts.incision} onLock={onClosePatient} />
-          <EventLog events={events} />
         </div>
       </div>
       {apiError && (

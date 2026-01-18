@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { RealtimeVision } from '@overshoot/sdk';
 import Tally from './Tally';
 import SafetyLock from './SafetyLock';
-import EventLog from './EventLog';
 import { useItemTracking } from '../hooks/useItemTracking';
 
 const ROBOFLOW_VALIDATION_INTERVAL_MINUTES = 2;
@@ -116,7 +115,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
     };
   }, []);
 
-  const { trackedItems, events, counts } = useItemTracking(analysisResult);
+  const { trackedItems, counts } = useItemTracking(analysisResult);
 
   useEffect(() => {
     trackedItemsRef.current = trackedItems;
@@ -1050,9 +1049,6 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
 
         <div className="flex flex-col gap-6 justify-center h-full">
           <SafetyLock incisionCount={incisionCount} onLock={onClosePatient} />
-          {videoMode === 'camera' && (
-            <EventLog events={events} />
-          )}
         </div>
       </div>
       {apiError && (

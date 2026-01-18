@@ -244,5 +244,5 @@ export const useItemTracking = (analysisResult) => {
 
   }, [analysisResult]);
 
-  return { trackedItems, events, counts };
+  return { trackedItems, counts };
 };

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import LiveMonitoring from './components/LiveMonitoring';
 import ZoneCalibration from './components/ZoneCalibration';
+import MetricsDisplay from './components/MetricsDisplay';
 
 function App() {
   const [mode, setMode] = useState('calibration');
@@ -19,7 +20,11 @@ function App() {
 
   const handleClosePatient = () => {
     setMode('calibration');
-    // Keep zones as they are, don't reset them
+    // Reset zones so they can be redrawn
+    setZones({
+      tray: null,
+      incision: null
+    });
   };
 
   return (
@@ -27,7 +32,14 @@ function App() {
       <header className="mb-8 flex justify-between items-center">
         <div className="flex items-center gap-3">
           <div 
-            onClick={() => setMode('calibration')}
+            onClick={() => {
+              setMode('calibration');
+              // Reset zones so they can be redrawn
+              setZones({
+                tray: null,
+                incision: null
+              });
+            }}
             className="h-9 w-9 rounded-2xl bg-slate-950 border border-sky-500/60 shadow-lg flex items-center justify-center relative overflow-hidden cursor-pointer hover:border-sky-400 transition-colors"
           >
             <div className="absolute inset-0 bg-gradient-to-br from-sky-500/25 via-emerald-400/15 to-cyan-300/20 opacity-80" />
@@ -60,7 +72,14 @@ function App() {
           </span>
           {mode === 'monitoring' && (
             <button 
-              onClick={() => setMode('calibration')}
+              onClick={() => {
+                setMode('calibration');
+                // Reset zones so they can be redrawn
+                setZones({
+                  tray: null,
+                  incision: null
+                });
+              }}
               className="text-xs font-medium text-slate-200 px-3 py-1 rounded-full border border-slate-600 hover:border-slate-400 hover:bg-slate-800/60 transition-colors"
             >
               Recalibrate zones
@@ -107,6 +126,7 @@ function App() {
           />
         )}
       </main>
+      <MetricsDisplay />
     </div>
   );
 }

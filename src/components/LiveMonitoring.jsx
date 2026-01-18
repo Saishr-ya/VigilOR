@@ -5,7 +5,10 @@ import SafetyLock from './SafetyLock';
 import EventLog from './EventLog';
 import { useItemTracking } from '../hooks/useItemTracking';
 
-const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
+const ROBOFLOW_VALIDATION_INTERVAL_MINUTES = 2;
+const ROBOFLOW_TRACKING_INTERVAL_MS = 2500;
+
+const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, videoFileUrl, videoFile, onVideoModeChange, onVideoFileChange }) => {
   const videoRef = useRef(null);
   const [displaySize, setDisplaySize] = useState({ width: 1, height: 1 });
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -13,6 +16,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
   const [apiError, setApiError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
   const visionRef = useRef(null);
+  const [snapshotMode, setSnapshotMode] = useState(false);
   const [baselineCounts, setBaselineCounts] = useState(null);
   const [postCounts, setPostCounts] = useState(null);
   const [scanPhase, setScanPhase] = useState(null);
@@ -25,6 +29,8 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
   const [dynamicZones, setDynamicZones] = useState(zones);
   const dynamicZonesRef = useRef(zones);
   const [baselineObjectHints, setBaselineObjectHints] = useState(null);
+  const [baselineTrayCount, setBaselineTrayCount] = useState(null);
+  const [baselineIncisionCount, setBaselineIncisionCount] = useState(null);
   const zoneTemplatesRef = useRef({ tray: null, incision: null });
   const trackedItemsRef = useRef([]);
   const [trackingActive, setTrackingActive] = useState(false);
@@ -83,11 +89,46 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
     };
   }, [externalStream]);
 
+  useEffect(() => {
+    setDynamicZones(zones);
+    dynamicZonesRef.current = zones;
+    const current = zoneTemplatesRef.current;
+    if (current.tray) {
+      current.tray.delete();
+    }
+    if (current.incision) {
+      current.incision.delete();
+    }
+    zoneTemplatesRef.current = { tray: null, incision: null };
+  }, [zones]);
+
+  useEffect(() => {
+    return () => {
+      const current = zoneTemplatesRef.current;
+      if (current.tray) {
+        current.tray.delete();
+      }
+      if (current.incision) {
+        current.incision.delete();
+      }
+      zoneTemplatesRef.current = { tray: null, incision: null };
+    };
+  }, []);
+
   const { trackedItems, events, counts } = useItemTracking(analysisResult);
+
+  useEffect(() => {
+    trackedItemsRef.current = trackedItems;
+  }, [trackedItems]);
 
   useEffect(() => {
     const apiKey = import.meta.env.VITE_OVERSHOOT_API_KEY;
     const baseUrl = import.meta.env.VITE_OVERSHOOT_BASE_URL || "https://cluster1.overshoot.ai/api/v0.2";
+
+    if (videoMode === 'file') {
+      setSnapshotMode(false);
+      return;
+    }
 
     if (!apiKey) {
       setApiError("Missing VITE_OVERSHOOT_API_KEY");
@@ -98,45 +139,49 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
       return;
     }
 
-      // Convert normalized zones to pixels for the prompt
-      const video = videoRef.current;
-      const width = video ? video.videoWidth : 1280;
-      const height = video ? video.videoHeight : 720;
+    const video = videoRef.current;
+    const width = video ? (video.videoWidth || 1280) : 1280;
+    const height = video ? (video.videoHeight || 720) : 720;
 
-      const tray = {
-        x1: Math.round(zones.tray.x1 * width),
-        y1: Math.round(zones.tray.y1 * height),
-        x2: Math.round(zones.tray.x2 * width),
-        y2: Math.round(zones.tray.y2 * height)
-      };
+    const tray = {
+      x1: Math.round(zones.tray.x1 * width),
+      y1: Math.round(zones.tray.y1 * height),
+      x2: Math.round(zones.tray.x2 * width),
+      y2: Math.round(zones.tray.y2 * height)
+    };
 
-      const incision = {
-        x1: Math.round(zones.incision.x1 * width),
-        y1: Math.round(zones.incision.y1 * height),
-        x2: Math.round(zones.incision.x2 * width),
-        y2: Math.round(zones.incision.y2 * height)
-      };
+    const incision = {
+      x1: Math.round(zones.incision.x1 * width),
+      y1: Math.round(zones.incision.y1 * height),
+      x2: Math.round(zones.incision.x2 * width),
+      y2: Math.round(zones.incision.y2 * height)
+    };
 
-      const prompt = [
-        "Identify all clearly visible objects (surgical instruments, bottles, phones, etc).",
-        "For each object, return:",
-        "- type: short label (e.g. bottle, sponge, scissors)",
-        "- x: center x pixel",
-        "- y: center y pixel",
-        "",
-        `Tray bounds: x1=${tray.x1}, x2=${tray.x2}, y1=${tray.y1}, y2=${tray.y2}.`,
-        `Incision bounds: x1=${incision.x1}, x2=${incision.x2}, y1=${incision.y1}, y2=${incision.y2}.`,
-        "",
-        "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number, \"zone\": \"tray\" | \"incision\" | null}] }"
-      ].join(" ");
+    const prompt = [
+      "Identify all clearly visible surgical instruments (scissor, retractor, mallet, elevator, forceps, syringe).",
+      "For each instrument, return:",
+      "- type: short label",
+      "- x: center x pixel",
+      "- y: center y pixel",
+      "",
+      `Tray bounds: x1=${tray.x1}, x2=${tray.x2}, y1=${tray.y1}, y2=${tray.y2}.`,
+      `Incision bounds: x1=${incision.x1}, x2=${incision.x2}, y1=${incision.y1}, y2=${incision.y2}.`,
+      "",
+      "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number}] }"
+    ].join(" ");
 
-    // Config options
+    setSnapshotMode(false);
+
+    const sourceConfig = {
+      type: 'camera'
+    };
+
     const config = {
       apiUrl: baseUrl,
       apiKey: apiKey,
       prompt: prompt,
       model: 'Qwen/Qwen3-VL-30B-A3B-Instruct',
-      source: externalStream || undefined,
+      source: sourceConfig,
       outputSchema: {
         type: 'object',
         properties: {
@@ -147,78 +192,104 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
               properties: {
                 type: { type: 'string' },
                 x: { type: 'number' },
-                y: { type: 'number' },
-                zone: { type: 'string', enum: ['tray', 'incision', null] }
+                y: { type: 'number' }
               }
             }
-          },
-          tray_count: { type: 'number' },
-          incision_count: { type: 'number' }
+          }
         }
       },
       onResult: (result) => {
-        setIsProcessing(true);
         try {
-          let parsed;
-          if (typeof result.result === 'string') {
-            parsed = JSON.parse(result.result);
-          } else {
-            parsed = result.result;
+          let parsed = null;
+          const raw = result && result.result;
+
+          if (raw == null) {
+            return;
           }
-          
+
+          if (typeof raw === 'object') {
+            parsed = raw;
+          } else if (typeof raw === 'string') {
+            const trimmed = raw.trim();
+            if (!trimmed) {
+              return;
+            }
+            if (!((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')))) {
+              return;
+            }
+            try {
+              parsed = JSON.parse(trimmed);
+            } catch (e) {
+              console.warn("[LiveMonitoring] Skipping non-JSON chunk from Overshoot", e);
+              return;
+            }
+          } else {
+            return;
+          }
+
           console.log("[LiveMonitoring] Vision Result:", parsed);
-          
-                      const normalizedItems = (parsed.items || []).map(item => {
-            const video = videoRef.current;
-            const width = video ? video.videoWidth : 1280;
-            const height = video ? video.videoHeight : 720;
+
+          const baseZones = dynamicZonesRef.current || zones;
+          const updatedZones = trackZonesWithTemplate(videoRef.current, baseZones, zoneTemplatesRef);
+          const finalZones = updatedZones || baseZones;
+          if (finalZones) {
+            dynamicZonesRef.current = finalZones;
+            setDynamicZones(finalZones);
+          }
+
+          const normalizedItems = (parsed.items || []).map(item => {
+            const currentVideo = videoRef.current;
+            const w = currentVideo ? currentVideo.videoWidth : 1280;
+            const h = currentVideo ? currentVideo.videoHeight : 720;
             const x = typeof item.x === 'number' ? item.x : 0;
             const y = typeof item.y === 'number' ? item.y : 0;
 
-            const xNorm = x / width;
-            const yNorm = y / height;
-
-            // Reduced margins for more accurate zone detection
-            const trayMarginX = 0.0;
-            const trayMarginY = 0.0;
-            const incisionMarginX = 0.0;
-            const incisionMarginY = 0.0;
-
-            const trayX1 = Math.max(0, zones.tray.x1 - trayMarginX);
-            const trayX2 = Math.min(1, zones.tray.x2 + trayMarginX);
-            const trayY1 = Math.max(0, zones.tray.y1 - trayMarginY);
-            const trayY2 = Math.min(1, zones.tray.y2 + trayMarginY);
-
-            const incisionX1 = Math.max(0, zones.incision.x1 - incisionMarginX);
-            const incisionX2 = Math.min(1, zones.incision.x2 + incisionMarginX);
-            const incisionY1 = Math.max(0, zones.incision.y1 - incisionMarginY);
-            const incisionY2 = Math.min(1, zones.incision.y2 + incisionMarginY);
-
-            let zone = item.zone; // Keep the zone from API if provided
-            
-            // Only override if zone is null or undefined
-            if (!zone) {
-              const inTray = xNorm >= trayX1 && xNorm <= trayX2 &&
-                             yNorm >= trayY1 && yNorm <= trayY2;
-              const inIncision = xNorm >= incisionX1 && xNorm <= incisionX2 &&
-                                 yNorm >= incisionY1 && yNorm <= incisionY2;
-
-              if (inIncision) {
-                zone = 'incision';
-              } else if (inTray) {
-                zone = 'tray';
-              }
+            let xNorm;
+            let yNorm;
+            if (x <= 1 && y <= 1) {
+              xNorm = x;
+              yNorm = y;
+            } else {
+              xNorm = w ? x / w : 0;
+              yNorm = h ? y / h : 0;
             }
-            
-            console.log("[LiveMonitoring] Item:", item.type, "at", xNorm.toFixed(2), yNorm.toFixed(2), "zone:", zone);
+
+            const trayMarginX = 0.02;
+            const trayMarginY = 0.02;
+            const incisionMarginX = 0.05;
+            const incisionMarginY = 0.05;
+
+            const zonesForClassification = finalZones || zones;
+
+            const trayX1 = Math.max(0, zonesForClassification.tray.x1 - trayMarginX);
+            const trayX2 = Math.min(1, zonesForClassification.tray.x2 + trayMarginX);
+            const trayY1 = Math.max(0, zonesForClassification.tray.y1 - trayMarginY);
+            const trayY2 = Math.min(1, zonesForClassification.tray.y2 + trayMarginY);
+
+            const incisionX1 = Math.max(0, zonesForClassification.incision.x1 - incisionMarginX);
+            const incisionX2 = Math.min(1, zonesForClassification.incision.x2 + incisionMarginX);
+            const incisionY1 = Math.max(0, zonesForClassification.incision.y1 - incisionMarginY);
+            const incisionY2 = Math.min(1, zonesForClassification.incision.y2 + incisionMarginY);
+
+            let zone = null;
+            const inTray = xNorm >= trayX1 && xNorm <= trayX2 &&
+                           yNorm >= trayY1 && yNorm <= trayY2;
+            const inIncision = xNorm >= incisionX1 && xNorm <= incisionX2 &&
+                               yNorm >= incisionY1 && yNorm <= incisionY2;
+
+            if (inIncision) {
+              zone = 'incision';
+            } else if (inTray) {
+              zone = 'tray';
+            }
 
             return { ...item, x: xNorm, y: yNorm, zone };
           });
-          
+
           setAnalysisResult({
-             items: normalizedItems,
-             tray_count: parsed.tray_count || 0,
-             incision_count: parsed.incision_count || 0
+            items: normalizedItems,
+            tray_count: normalizedItems.filter(i => i.zone === 'tray').length,
+            incision_count: normalizedItems.filter(i => i.zone === 'incision').length
           });
           setApiError(null);
         } catch (e) {
@@ -230,18 +301,32 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
     const vision = new RealtimeVision(config);
 
     visionRef.current = vision;
-    
-    vision.start().catch(err => {
-      console.error("[LiveMonitoring] Failed to start vision", err);
-      setApiError(err.message);
-    });
+
+    vision.start()
+      .then(() => {
+        setIsProcessing(true);
+      })
+      .catch(err => {
+        console.error("[LiveMonitoring] Failed to start vision", err);
+        setApiError(err.message);
+        setIsProcessing(false);
+      });
 
     return () => {
       if (visionRef.current) {
         visionRef.current.stop();
       }
+      setIsProcessing(false);
     };
-  }, [zones, externalStream]);
+  }, [zones, videoMode, videoFile]);
+
+  useEffect(() => {
+    if (videoMode !== 'file') {
+      setTrackingActive(false);
+      return;
+    }
+    setTrackingActive(false);
+  }, [videoMode, videoFileUrl]);
 
   const handleScan = async phase => {
     if (!videoRef.current) return;
@@ -249,10 +334,21 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
     setScanLoading(true);
     setScanError(null);
     try {
+      if (videoMode === 'file' && phase === 'baseline') {
+        const video = videoRef.current;
+        try {
+          video.currentTime = 0;
+        } catch (e) {}
+        video.play().catch(() => {});
+        setTrackingActive(true);
+      }
       const frame = captureFrameFromVideo(videoRef.current);
       const enhancedBase64 = await enhanceFrameWithOpenCV(frame.canvas);
       const rfResult = await runRoboflowDetection(enhancedBase64);
+      console.log('[LiveMonitoring] Roboflow raw result:', rfResult);
       const { counts, predictions } = buildCountsFromRoboflow(rfResult);
+      console.log('[LiveMonitoring] Roboflow counts:', counts);
+      console.log('[LiveMonitoring] Roboflow predictions:', predictions);
       setRfPredictions(predictions);
 
       const video = videoRef.current;
@@ -314,7 +410,16 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
         incision_count: incisionZoneCount
       });
 
-      const scanCounts = counts || {};
+      const scanCounts = itemsFromRoboflow.reduce((acc, item) => {
+        if (!item.zone) {
+          return acc;
+        }
+        if (!item.type) {
+          return acc;
+        }
+        acc[item.type] = (acc[item.type] || 0) + 1;
+        return acc;
+      }, {});
 
       if (phase === 'baseline') {
         const trayAtBaseline = itemsFromRoboflow.filter(item => item.zone === 'tray').length;
@@ -324,6 +429,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
         setBaselineCounts(scanCounts);
         setPostCounts(null);
         setDiscrepancy(null);
+        setBaselineObjectHints(itemsFromRoboflow);
       } else {
         setPostCounts(scanCounts);
         if (baselineCounts) {
@@ -339,7 +445,14 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
     } finally {
       setScanLoading(false);
       const video = videoRef.current;
-      if (video && video.paused) {
+      if (!video) {
+        return;
+      }
+      if (videoMode === 'file') {
+        if (phase === 'baseline' && video.paused && !video.ended) {
+          video.play().catch(() => {});
+        }
+      } else if (video.paused) {
         video.play().catch(() => {});
       }
     }
@@ -590,7 +703,29 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
   const roboPostTotal = postCounts ? Object.values(postCounts).reduce((sum, v) => sum + v, 0) : null;
   const overshootTotal = overshootCounts ? Object.values(overshootCounts).reduce((sum, v) => sum + v, 0) : null;
 
-  const incisionCount = counts.incision || 0;
+  const baselineTotal =
+    baselineTrayCount != null && baselineIncisionCount != null
+      ? baselineTrayCount + baselineIncisionCount
+      : null;
+
+  const liveIncisionFromTracking = trackedItems.filter(item => item.zone === 'incision').length;
+  const liveIncisionFromAnalysis =
+    analysisResult && typeof analysisResult.incision_count === 'number'
+      ? analysisResult.incision_count
+      : 0;
+  const liveIncisionCount = Math.max(liveIncisionFromTracking, liveIncisionFromAnalysis);
+
+  const effectiveIncisionCount =
+    baselineTotal != null ? Math.min(baselineTotal, liveIncisionCount) : (counts.incision || liveIncisionCount || 0);
+
+  const effectiveTrayCount =
+    baselineTotal != null
+      ? Math.max(0, baselineTotal - effectiveIncisionCount)
+      : (counts.tray || (analysisResult && typeof analysisResult.tray_count === 'number'
+          ? analysisResult.tray_count
+          : 0));
+
+  const incisionCount = effectiveIncisionCount;
   const incisionItems = trackedItems.filter(item => item.zone === 'incision');
   const incisionSummaryByType = incisionItems.reduce((acc, item) => {
     if (!item.type) {
@@ -599,31 +734,13 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
     acc[item.type] = (acc[item.type] || 0) + 1;
     return acc;
   }, {});
-  const hasRetainedInIncision =
-    scanPhase === 'post' &&
-    incisionCount > 0;
-  const allItemsAccountedFor =
-    baselineCounts &&
-    postCounts &&
-    !hasDiscrepancy &&
-    !hasRetainedInIncision;
-
-  useEffect(() => {
-    if (postScanVersion <= 0) {
-      return;
-    }
-    if (scanPhase !== 'post') {
-      return;
-    }
-    const incisionItemsNow = trackedItems.filter(i => i.zone === 'incision');
-    setShowIncisionPopup(incisionItemsNow.length > 0);
-  }, [postScanVersion, scanPhase]);
+  const hasRetainedInIncision = incisionCount > 0;
 
   return (
     <div className="flex flex-col h-[calc(100vh-140px)] gap-4">
       {showIncisionPopup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-lg shadow-lg p-[camc(100vh-200px)]x-w-sm w-full">
+          <div className="bg-white rounded-lg shadow-lg p-4 max-w-sm w-full">
             <div className="font-semibold text-red-700 mb-2">
               Items still in incision zone
             </div>
@@ -649,53 +766,79 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
       )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
         <div className="lg:col-span-2 flex flex-col gap-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => onVideoModeChange('camera')}
+              className={`px-3 py-1 rounded-full text-sm border ${
+                videoMode === 'camera'
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-700 border-gray-300'
+              }`}
+            >
+              Live camera
+            </button>
+            <label className="px-3 py-1 rounded-full text-sm border bg-white text-gray-700 border-gray-300 cursor-pointer">
+              Upload video
+              <input
+                type="file"
+                accept="video/*"
+                onChange={handleVideoFileChange}
+                className="hidden"
+              />
+            </label>
+            {videoMode === 'file' && videoFileUrl && (
+              <span className="text-xs text-gray-500">
+                Using uploaded video
+              </span>
+            )}
+          </div>
+
           <div className="bg-black rounded-lg overflow-hidden shadow-lg relative">
-           <CameraPreview forwardedRef={videoRef} externalStream={externalStream} />
+           <CameraPreview
+             forwardedRef={videoRef}
+             externalStream={externalStream}
+             videoFileUrl={videoFileUrl}
+             videoMode={videoMode}
+           />
            
            {/* Overlay for tracked items */}
            <div className="absolute inset-0 pointer-events-none">
-             {trackedItems.filter(item => item.zone === 'tray' || item.zone === 'incision').map((item) => {
-               // Estimate object size (you can adjust these values)
-               const objectWidth = 80; // pixels
-               const objectHeight = 80; // pixels
-               const centerX = item.x * displaySize.width;
-               const centerY = item.y * displaySize.height;
-               
-               return (
-                 <div 
-                   key={item.id}
-                   className={`absolute border-2 shadow-sm transition-all duration-300 ${
-                     item.zone === 'incision' ? 'border-red-500 bg-red-500/10' : 'border-green-500 bg-green-500/10'
-                   }`}
-                   style={{ 
-                     left: centerX - objectWidth / 2, 
-                     top: centerY - objectHeight / 2,
-                     width: objectWidth,
-                     height: objectHeight,
-                     opacity: (Date.now() - item.lastSeen) > 300 ? 0.5 : 1
-                   }}
-                 >
-                   <span className="absolute -bottom-6 left-0 right-0 text-center bg-black/70 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
-                     {item.type}
-                   </span>
-                 </div>
-               );
-             })}
+             {trackedItems.filter(item => item.zone === 'tray' || item.zone === 'incision').map((item) => (
+               <div 
+                 key={item.id}
+                 className={`absolute w-6 h-6 rounded-full border-2 border-white shadow-sm transition-all duration-300 ${
+                   item.zone === 'incision' ? 'bg-red-500' : 'bg-green-500'
+                 }`}
+                 style={{ 
+                   left: item.x * displaySize.width, 
+                   top: item.y * displaySize.height, 
+                   transform: 'translate(-50%, -50%)',
+                   opacity: (Date.now() - item.lastSeen) > 300 ? 0.5 : 1
+                 }}
+               >
+                 <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+                   {item.type}
+                 </span>
+               </div>
+             ))}
 
-            {rfPredictions.map(pred => {
-              const baseWidth = 640;
-              const baseHeight = 480;
-              const scaleX = displaySize.width / baseWidth;
-              const scaleY = displaySize.height / baseHeight;
+            {videoMode === 'file' && rfPredictions.map(pred => {
+              const currentVideo = videoRef.current;
+              const baseWidth = currentVideo ? (currentVideo.videoWidth || currentVideo.clientWidth || 640) : 640;
+              const baseHeight = currentVideo ? (currentVideo.videoHeight || currentVideo.clientHeight || 480) : 480;
+              const scaleX = baseWidth ? displaySize.width / baseWidth : 1;
+              const scaleY = baseHeight ? displaySize.height / baseHeight : 1;
               const left = (pred.x - pred.width / 2) * scaleX;
               const top = (pred.y - pred.height / 2) * scaleY;
               const width = pred.width * scaleX;
               const height = pred.height * scaleY;
               let color = 'border-white';
-              if (pred.class === 'scalpel') color = 'border-red-500';
-              else if (pred.class === 'scissors') color = 'border-blue-500';
-              else if (pred.class === 'clamp') color = 'border-green-500';
-              else if (pred.class === 'sponge') color = 'border-yellow-400';
+              if (pred.class === 'scissor') color = 'border-blue-500';
+              else if (pred.class === 'retractor') color = 'border-green-500';
+              else if (pred.class === 'mallet') color = 'border-yellow-400';
+              else if (pred.class === 'elevator') color = 'border-purple-500';
+              else if (pred.class === 'forceps') color = 'border-pink-500';
+              else if (pred.class === 'syringe') color = 'border-red-500';
               return (
                 <div
                   key={pred.id}
@@ -714,29 +857,34 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
               );
             })}
              
-             {/* Zone Outlines */}
-             {zones && (
-                <>
-                  <div 
-                    className="absolute border-2 border-green-500/30 bg-green-500/10 pointer-events-none"
-                    style={{
-                        left: zones.tray.x1 * displaySize.width,
-                        top: zones.tray.y1 * displaySize.height,
-                        width: (zones.tray.x2 - zones.tray.x1) * displaySize.width,
-                        height: (zones.tray.y2 - zones.tray.y1) * displaySize.height
-                    }}
-                  />
-                  <div 
-                    className="absolute border-2 border-red-500/30 bg-red-500/10 pointer-events-none"
-                    style={{
-                        left: zones.incision.x1 * displaySize.width,
-                        top: zones.incision.y1 * displaySize.height,
-                        width: (zones.incision.x2 - zones.incision.x1) * displaySize.width,
-                        height: (zones.incision.y2 - zones.incision.y1) * displaySize.height
-                    }}
-                  />
-                </>
-             )}
+             {(() => {
+               const zonesToRender = dynamicZones || zones;
+               if (!zonesToRender || !zonesToRender.tray || !zonesToRender.incision) {
+                 return null;
+               }
+               return (
+                 <>
+                   <div 
+                     className="absolute border-2 border-green-500/30 bg-green-500/10 pointer-events-none"
+                     style={{
+                         left: zonesToRender.tray.x1 * displaySize.width,
+                         top: zonesToRender.tray.y1 * displaySize.height,
+                         width: (zonesToRender.tray.x2 - zonesToRender.tray.x1) * displaySize.width,
+                         height: (zonesToRender.tray.y2 - zonesToRender.tray.y1) * displaySize.height
+                     }}
+                   />
+                   <div 
+                     className="absolute border-2 border-red-500/30 bg-red-500/10 pointer-events-none"
+                     style={{
+                         left: zonesToRender.incision.x1 * displaySize.width,
+                         top: zonesToRender.incision.y1 * displaySize.height,
+                         width: (zonesToRender.incision.x2 - zonesToRender.incision.x1) * displaySize.width,
+                         height: (zonesToRender.incision.y2 - zonesToRender.incision.y1) * displaySize.height
+                     }}
+                   />
+                 </>
+               );
+             })()}
            </div>
            
            <div className="absolute top-4 right-4 bg-black/60 text-white px-3 py-1 rounded-full text-sm flex items-center gap-2">
@@ -764,6 +912,11 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
               <div className="text-sm text-gray-600">
                 Baseline saved
               </div>
+            )}
+            {videoMode === 'file' && snapshotMode && (
+              <span className="text-xs text-gray-500">
+                Overshoot running on snapshots for uploaded video
+              </span>
             )}
           </div>
 
@@ -849,15 +1002,22 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
 };
 
 // Simple internal component to just show the user's face/environment so they can see what they are doing
-const CameraPreview = ({ forwardedRef, externalStream }) => {
+const CameraPreview = ({ forwardedRef, externalStream, videoFileUrl, videoMode }) => {
   useEffect(() => {
     let stream = null;
-    
-    if (externalStream) {
-      if (forwardedRef.current) {
-        forwardedRef.current.srcObject = externalStream;
-      }
-      return;
+    const video = forwardedRef.current;
+
+    if (videoMode === 'file' && videoFileUrl && video) {
+      video.srcObject = null;
+      video.src = videoFileUrl;
+      return () => {
+      };
+    }
+
+    if (externalStream && video) {
+      video.srcObject = externalStream;
+      video.play().catch(() => {});
+      return () => {};
     }
 
     const startCamera = async () => {
@@ -868,6 +1028,7 @@ const CameraPreview = ({ forwardedRef, externalStream }) => {
         });
         if (forwardedRef.current) {
           forwardedRef.current.srcObject = stream;
+          forwardedRef.current.play().catch(() => {});
         }
       } catch (err) {
         console.error("Error accessing camera for preview:", err);
@@ -880,18 +1041,101 @@ const CameraPreview = ({ forwardedRef, externalStream }) => {
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [forwardedRef, externalStream]);
+  }, [forwardedRef, externalStream, videoFileUrl, videoMode]);
 
   return (
     <video 
-      ref={forwardedRef} 
-      autoPlay 
+      ref={forwardedRef}
       playsInline 
       muted 
       className="w-full h-auto block"
     />
   );
 };
+
+function trackZonesWithTemplate(videoElement, currentZones, templatesRef) {
+  const cv = window.cv;
+  if (!cv || !videoElement || !currentZones) {
+    return currentZones;
+  }
+  const frameData = captureFrameFromVideo(videoElement);
+  const canvas = frameData.canvas;
+  const src = cv.imread(canvas);
+  const gray = new cv.Mat();
+  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+  const updated = { ...currentZones };
+  const names = ['tray', 'incision'];
+
+  names.forEach(name => {
+    const zone = currentZones[name];
+    if (!zone) {
+      return;
+    }
+    const cols = gray.cols;
+    const rows = gray.rows;
+    const x = Math.max(0, Math.min(cols - 1, Math.round(zone.x1 * cols)));
+    const y = Math.max(0, Math.min(rows - 1, Math.round(zone.y1 * rows)));
+    const w = Math.max(10, Math.round((zone.x2 - zone.x1) * cols));
+    const h = Math.max(10, Math.round((zone.y2 - zone.y1) * rows));
+    const width = Math.min(w, cols - x);
+    const height = Math.min(h, rows - y);
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+
+    let template = templatesRef.current[name];
+    if (!template) {
+      const roi = gray.roi(new cv.Rect(x, y, width, height));
+      const clone = roi.clone();
+      roi.delete();
+      templatesRef.current[name] = clone;
+      updated[name] = zone;
+      return;
+    }
+
+    const resultCols = gray.cols - template.cols + 1;
+    const resultRows = gray.rows - template.rows + 1;
+    if (resultCols <= 0 || resultRows <= 0) {
+      return;
+    }
+
+    const result = new cv.Mat();
+    result.create(resultRows, resultCols, cv.CV_32FC1);
+    cv.matchTemplate(gray, template, result, cv.TM_CCOEFF_NORMED);
+    const mm = cv.minMaxLoc(result);
+    const maxLoc = mm.maxLoc;
+    const maxVal = mm.maxVal;
+    result.delete();
+
+    if (typeof maxVal !== 'number' || maxVal < 0.5) {
+      return;
+    }
+
+    const nx1 = maxLoc.x / gray.cols;
+    const ny1 = maxLoc.y / gray.rows;
+    const nx2 = (maxLoc.x + template.cols) / gray.cols;
+    const ny2 = (maxLoc.y + template.rows) / gray.rows;
+
+    updated[name] = {
+      x1: Math.max(0, Math.min(1, nx1)),
+      y1: Math.max(0, Math.min(1, ny1)),
+      x2: Math.max(0, Math.min(1, nx2)),
+      y2: Math.max(0, Math.min(1, ny2))
+    };
+
+    const newRoi = gray.roi(new cv.Rect(maxLoc.x, maxLoc.y, template.cols, template.rows));
+    const newTemplate = newRoi.clone();
+    newRoi.delete();
+    template.delete();
+    templatesRef.current[name] = newTemplate;
+  });
+
+  gray.delete();
+  src.delete();
+
+  return updated;
+}
 
 function captureFrameFromVideo(videoElement) {
   const canvas = document.createElement('canvas');
@@ -964,7 +1208,8 @@ async function runRoboflowDetection(base64Image) {
 }
 
 function buildCountsFromRoboflow(result) {
-  const predictionsArray =
+  let predictionsArray = [];
+  if (
     result &&
     result.outputs &&
     result.outputs.predictions &&
@@ -1007,7 +1252,7 @@ function buildCountsFromRoboflow(result) {
   const allowedClasses = ['scissor', 'retractor', 'mallet', 'elevator', 'forceps', 'syringe'];
   const minConfidence = 0.7;
 
-  const predictions = predictionsArray
+  const rawPredictions = predictionsArray
     .map((p, idx) => ({
       id: p.id || idx,
       class: p.class || p.name || 'unknown',
@@ -1018,6 +1263,56 @@ function buildCountsFromRoboflow(result) {
       height: p.height,
     }))
     .filter(p => allowedClasses.includes(p.class) && p.confidence >= minConfidence);
+  const predictions = [];
+  const iouThreshold = 0.5;
+  const sorted = rawPredictions.slice().sort((a, b) => b.confidence - a.confidence);
+  sorted.forEach(candidate => {
+    if (
+      typeof candidate.x !== 'number' ||
+      typeof candidate.y !== 'number' ||
+      typeof candidate.width !== 'number' ||
+      typeof candidate.height !== 'number'
+    ) {
+      return;
+    }
+    const keep = !predictions.some(existing => {
+      if (existing.class !== candidate.class) {
+        return false;
+      }
+      const ax1 = existing.x - existing.width / 2;
+      const ay1 = existing.y - existing.height / 2;
+      const ax2 = existing.x + existing.width / 2;
+      const ay2 = existing.y + existing.height / 2;
+      const bx1 = candidate.x - candidate.width / 2;
+      const by1 = candidate.y - candidate.height / 2;
+      const bx2 = candidate.x + candidate.width / 2;
+      const by2 = candidate.y + candidate.height / 2;
+      const ix1 = Math.max(ax1, bx1);
+      const iy1 = Math.max(ay1, by1);
+      const ix2 = Math.min(ax2, bx2);
+      const iy2 = Math.min(ay2, by2);
+      const iw = Math.max(0, ix2 - ix1);
+      const ih = Math.max(0, iy2 - iy1);
+      const intersection = iw * ih;
+      if (intersection <= 0) {
+        return false;
+      }
+      const areaA = (ax2 - ax1) * (ay2 - ay1);
+      const areaB = (bx2 - bx1) * (by2 - by1);
+      if (areaA <= 0 || areaB <= 0) {
+        return false;
+      }
+      const union = areaA + areaB - intersection;
+      if (union <= 0) {
+        return false;
+      }
+      const iou = intersection / union;
+      return iou >= iouThreshold;
+    });
+    if (keep) {
+      predictions.push(candidate);
+    }
+  });
   const counts = {};
   predictions.forEach(pred => {
     const label = pred.class;

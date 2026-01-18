@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 
+const MATCH_THRESHOLD = 0.08;
+const MERGE_THRESHOLD = 0.08;
 const ZONE_STABLE_FRAMES = 2;
+const ITEM_STALE_MS = 300;
 
 export const useItemTracking = (analysisResult) => {
   const [trackedItems, setTrackedItems] = useState([]);
@@ -18,8 +21,20 @@ export const useItemTracking = (analysisResult) => {
     console.log("[useItemTracking] New analysis result", analysisResult);
 
     const timestamp = Date.now();
-    const newDetections = analysisResult.items;
+    let newDetections = analysisResult.items || [];
     console.log("[useItemTracking] Detections count", newDetections.length);
+    newDetections = newDetections.filter((detection, index) => {
+      return !newDetections.slice(0, index).some(other => {
+        if (other.type !== detection.type) {
+          return false;
+        }
+        const dist = Math.sqrt(
+          Math.pow(other.x - detection.x, 2) +
+          Math.pow(other.y - detection.y, 2)
+        );
+        return dist < 0.08;
+      });
+    });
     
     let currentItems = [...itemsRef.current];
     
@@ -42,12 +57,37 @@ export const useItemTracking = (analysisResult) => {
           Math.pow(item.y - detection.y, 2)
         );
         
-        // Threshold for normalized coordinates (0.1 = 10% of screen)
-        if (dist < 0.1 && dist < minDist) {
+        if (dist < MATCH_THRESHOLD && dist < minDist) {
           minDist = dist;
           bestMatchIndex = idx;
         }
       });
+
+      if (bestMatchIndex === -1) {
+        let fallbackIndex = -1;
+        let fallbackDist = Infinity;
+        currentItems.forEach((item, idx) => {
+          if (matchedIndices.has(idx)) {
+            return;
+          }
+          if (item.type !== detection.type) {
+            return;
+          }
+          if ((timestamp - item.lastSeen) >= 500) {
+            return;
+          }
+          const dx = item.x - detection.x;
+          const dy = item.y - detection.y;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < 0.15 && d < fallbackDist) {
+            fallbackDist = d;
+            fallbackIndex = idx;
+          }
+        });
+        if (fallbackIndex !== -1) {
+          bestMatchIndex = fallbackIndex;
+        }
+      }
       
       if (bestMatchIndex !== -1) {
         matchedIndices.add(bestMatchIndex);
@@ -136,8 +176,25 @@ export const useItemTracking = (analysisResult) => {
       }
     });
     
-    currentItems = currentItems.filter(item => {
-      return (timestamp - item.lastSeen) < 3000;
+    const mergedItems = [];
+    currentItems
+      .sort((a, b) => b.lastSeen - a.lastSeen)
+      .forEach(item => {
+        const exists = mergedItems.some(other => {
+          if (other.type !== item.type) {
+            return false;
+          }
+          const dx = other.x - item.x;
+          const dy = other.y - item.y;
+          return Math.sqrt(dx * dx + dy * dy) < MERGE_THRESHOLD;
+        });
+        if (!exists) {
+          mergedItems.push(item);
+        }
+      });
+    
+    currentItems = mergedItems.filter(item => {
+      return (timestamp - item.lastSeen) < ITEM_STALE_MS;
     });
     
     // Update ref and state

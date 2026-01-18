@@ -131,29 +131,42 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
           console.log("[LiveMonitoring] Vision Result:", parsed);
           
           const normalizedItems = (parsed.items || []).map(item => {
-            let zone = item.zone;
-            
-            // Convert pixels to normalized
             const video = videoRef.current;
             const width = video ? video.videoWidth : 1280;
             const height = video ? video.videoHeight : 720;
-            
-            // Ensure coordinates exist
             const x = typeof item.x === 'number' ? item.x : 0;
             const y = typeof item.y === 'number' ? item.y : 0;
 
             const xNorm = x / width;
             const yNorm = y / height;
 
-            if (!zone) {
-               if (xNorm >= zones.tray.x1 && xNorm <= zones.tray.x2 &&
-                   yNorm >= zones.tray.y1 && yNorm <= zones.tray.y2) {
-                 zone = 'tray';
-               } else if (xNorm >= zones.incision.x1 && xNorm <= zones.incision.x2 &&
-                          yNorm >= zones.incision.y1 && yNorm <= zones.incision.y2) {
-                 zone = 'incision';
-               }
+            const trayMarginX = 0.02;
+            const trayMarginY = 0.02;
+            const incisionMarginX = 0.05;
+            const incisionMarginY = 0.05;
+
+            const trayX1 = Math.max(0, zones.tray.x1 - trayMarginX);
+            const trayX2 = Math.min(1, zones.tray.x2 + trayMarginX);
+            const trayY1 = Math.max(0, zones.tray.y1 - trayMarginY);
+            const trayY2 = Math.min(1, zones.tray.y2 + trayMarginY);
+
+            const incisionX1 = Math.max(0, zones.incision.x1 - incisionMarginX);
+            const incisionX2 = Math.min(1, zones.incision.x2 + incisionMarginX);
+            const incisionY1 = Math.max(0, zones.incision.y1 - incisionMarginY);
+            const incisionY2 = Math.min(1, zones.incision.y2 + incisionMarginY);
+
+            let zone = null;
+            const inTray = xNorm >= trayX1 && xNorm <= trayX2 &&
+                           yNorm >= trayY1 && yNorm <= trayY2;
+            const inIncision = xNorm >= incisionX1 && xNorm <= incisionX2 &&
+                               yNorm >= incisionY1 && yNorm <= incisionY2;
+
+            if (inIncision) {
+              zone = 'incision';
+            } else if (inTray) {
+              zone = 'tray';
             }
+
             return { ...item, x: xNorm, y: yNorm, zone };
           });
           
@@ -205,7 +218,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
            
            {/* Overlay for tracked items */}
            <div className="absolute inset-0 pointer-events-none">
-             {trackedItems.map((item) => (
+             {trackedItems.filter(item => item.zone === 'tray' || item.zone === 'incision').map((item) => (
                <div 
                  key={item.id}
                  className={`absolute w-6 h-6 rounded-full border-2 border-white shadow-sm transition-all duration-300 ${
@@ -215,7 +228,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
                    left: item.x * displaySize.width, 
                    top: item.y * displaySize.height, 
                    transform: 'translate(-50%, -50%)',
-                   opacity: (Date.now() - item.lastSeen) > 1000 ? 0.5 : 1
+                   opacity: (Date.now() - item.lastSeen) > 300 ? 0.5 : 1
                  }}
                >
                  <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-2 py-1 rounded whitespace-nowrap">

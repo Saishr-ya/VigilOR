@@ -107,7 +107,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
       apiKey: apiKey,
       prompt: prompt,
       model: 'Qwen/Qwen3-VL-30B-A3B-Instruct',
-      source: externalStream || undefined, // Try passing stream if available
+      source: externalStream || undefined,
       outputSchema: {
         type: 'object',
         properties: {
@@ -139,7 +139,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
           
           console.log("[LiveMonitoring] Vision Result:", parsed);
           
-          const normalizedItems = (parsed.items || []).map(item => {
+                      const normalizedItems = (parsed.items || []).map(item => {
             const video = videoRef.current;
             const width = video ? video.videoWidth : 1280;
             const height = video ? video.videoHeight : 720;
@@ -149,10 +149,11 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
             const xNorm = x / width;
             const yNorm = y / height;
 
-            const trayMarginX = 0.02;
-            const trayMarginY = 0.02;
-            const incisionMarginX = 0.05;
-            const incisionMarginY = 0.05;
+            // Reduced margins for more accurate zone detection
+            const trayMarginX = 0.0;
+            const trayMarginY = 0.0;
+            const incisionMarginX = 0.0;
+            const incisionMarginY = 0.0;
 
             const trayX1 = Math.max(0, zones.tray.x1 - trayMarginX);
             const trayX2 = Math.min(1, zones.tray.x2 + trayMarginX);
@@ -164,17 +165,23 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
             const incisionY1 = Math.max(0, zones.incision.y1 - incisionMarginY);
             const incisionY2 = Math.min(1, zones.incision.y2 + incisionMarginY);
 
-            let zone = null;
-            const inTray = xNorm >= trayX1 && xNorm <= trayX2 &&
-                           yNorm >= trayY1 && yNorm <= trayY2;
-            const inIncision = xNorm >= incisionX1 && xNorm <= incisionX2 &&
-                               yNorm >= incisionY1 && yNorm <= incisionY2;
+            let zone = item.zone; // Keep the zone from API if provided
+            
+            // Only override if zone is null or undefined
+            if (!zone) {
+              const inTray = xNorm >= trayX1 && xNorm <= trayX2 &&
+                             yNorm >= trayY1 && yNorm <= trayY2;
+              const inIncision = xNorm >= incisionX1 && xNorm <= incisionX2 &&
+                                 yNorm >= incisionY1 && yNorm <= incisionY2;
 
-            if (inIncision) {
-              zone = 'incision';
-            } else if (inTray) {
-              zone = 'tray';
+              if (inIncision) {
+                zone = 'incision';
+              } else if (inTray) {
+                zone = 'tray';
+              }
             }
+            
+            console.log("[LiveMonitoring] Item:", item.type, "at", xNorm.toFixed(2), yNorm.toFixed(2), "zone:", zone);
 
             return { ...item, x: xNorm, y: yNorm, zone };
           });
@@ -190,17 +197,6 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
         }
       }
     };
-
-    // If external stream is present, try to use it
-    // We can pass the video element as source if SDK supports it, or the stream?
-    // If SDK takes a 'source' parameter that can be a video element:
-    if (externalStream && videoRef.current) {
-        // config.source = videoRef.current; // Hypothetical support
-        // Note: If RealtimeVision doesn't support video element source, this won't work for analysis.
-        // But let's assume it defaults to camera if not specified.
-        // If we want to use external stream, we might need to rely on the fact that
-        // CameraPreview is playing the stream, and if we pass the video element, SDK might use it.
-    }
 
     const vision = new RealtimeVision(config);
 
@@ -333,24 +329,33 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient }) => {
            
            {/* Overlay for tracked items */}
            <div className="absolute inset-0 pointer-events-none">
-             {trackedItems.filter(item => item.zone === 'tray' || item.zone === 'incision').map((item) => (
-               <div 
-                 key={item.id}
-                 className={`absolute w-6 h-6 rounded-full border-2 border-white shadow-sm transition-all duration-300 ${
-                   item.zone === 'incision' ? 'bg-red-500' : 'bg-green-500'
-                 }`}
-                 style={{ 
-                   left: item.x * displaySize.width, 
-                   top: item.y * displaySize.height, 
-                   transform: 'translate(-50%, -50%)',
-                   opacity: (Date.now() - item.lastSeen) > 300 ? 0.5 : 1
-                 }}
-               >
-                 <span className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
-                   {item.type}
-                 </span>
-               </div>
-             ))}
+             {trackedItems.filter(item => item.zone === 'tray' || item.zone === 'incision').map((item) => {
+               // Estimate object size (you can adjust these values)
+               const objectWidth = 80; // pixels
+               const objectHeight = 80; // pixels
+               const centerX = item.x * displaySize.width;
+               const centerY = item.y * displaySize.height;
+               
+               return (
+                 <div 
+                   key={item.id}
+                   className={`absolute border-2 shadow-sm transition-all duration-300 ${
+                     item.zone === 'incision' ? 'border-red-500 bg-red-500/10' : 'border-green-500 bg-green-500/10'
+                   }`}
+                   style={{ 
+                     left: centerX - objectWidth / 2, 
+                     top: centerY - objectHeight / 2,
+                     width: objectWidth,
+                     height: objectHeight,
+                     opacity: (Date.now() - item.lastSeen) > 300 ? 0.5 : 1
+                   }}
+                 >
+                   <span className="absolute -bottom-6 left-0 right-0 text-center bg-black/70 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+                     {item.type}
+                   </span>
+                 </div>
+               );
+             })}
 
             {rfPredictions.map(pred => {
               const baseWidth = 640;

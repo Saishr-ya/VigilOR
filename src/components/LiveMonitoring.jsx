@@ -31,6 +31,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
   const [baselineObjectHints, setBaselineObjectHints] = useState(null);
   const zoneTemplatesRef = useRef({ tray: null, incision: null });
   const trackedItemsRef = useRef([]);
+  const [trackingActive, setTrackingActive] = useState(false);
 
   const handleVideoFileChange = event => {
     const file = event.target.files && event.target.files[0];
@@ -122,6 +123,11 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
     const apiKey = import.meta.env.VITE_OVERSHOOT_API_KEY;
     const baseUrl = import.meta.env.VITE_OVERSHOOT_BASE_URL || "https://cluster1.overshoot.ai/api/v0.2";
 
+    if (videoMode === 'file') {
+      setSnapshotMode(false);
+      return;
+    }
+
     if (!apiKey) {
       setApiError("Missing VITE_OVERSHOOT_API_KEY");
       return;
@@ -162,23 +168,11 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
       "Return JSON: { \"items\": [{\"type\": string, \"x\": number, \"y\": number}] }"
     ].join(" ");
 
-    let sourceConfig = null;
-    if (videoMode === 'file') {
-      setSnapshotMode(true);
-      if (!videoFile) {
-        console.warn("[LiveMonitoring] videoMode is file but no videoFile provided");
-        return;
-      }
-      sourceConfig = {
-        type: 'video',
-        file: videoFile
-      };
-    } else {
-      setSnapshotMode(false);
-      sourceConfig = {
-        type: 'camera'
-      };
-    }
+    setSnapshotMode(false);
+
+    const sourceConfig = {
+      type: 'camera'
+    };
 
     const config = {
       apiUrl: baseUrl,
@@ -324,12 +318,28 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
     };
   }, [zones, videoMode, videoFile]);
 
+  useEffect(() => {
+    if (videoMode !== 'file') {
+      setTrackingActive(false);
+      return;
+    }
+    setTrackingActive(false);
+  }, [videoMode, videoFileUrl]);
+
   const handleScan = async phase => {
     if (!videoRef.current) return;
     setScanPhase(phase);
     setScanLoading(true);
     setScanError(null);
     try {
+      if (videoMode === 'file' && phase === 'baseline') {
+        const video = videoRef.current;
+        try {
+          video.currentTime = 0;
+        } catch (e) {}
+        video.play().catch(() => {});
+        setTrackingActive(true);
+      }
       const frame = captureFrameFromVideo(videoRef.current);
       const enhancedBase64 = await enhanceFrameWithOpenCV(frame.canvas);
       const rfResult = await runRoboflowDetection(enhancedBase64);
@@ -559,6 +569,9 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
     if (videoMode !== 'file') {
       return;
     }
+    if (!trackingActive) {
+      return;
+    }
     let cancelled = false;
     let inFlight = false;
 
@@ -570,10 +583,10 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
         setTimeout(runTracking, ROBOFLOW_TRACKING_INTERVAL_MS);
         return;
       }
-       if (inFlight) {
-         setTimeout(runTracking, ROBOFLOW_TRACKING_INTERVAL_MS);
-         return;
-       }
+      if (inFlight) {
+        setTimeout(runTracking, ROBOFLOW_TRACKING_INTERVAL_MS);
+        return;
+      }
       try {
         const video = videoRef.current;
         if (!video || video.paused || video.ended) {
@@ -657,7 +670,7 @@ const LiveMonitoring = ({ zones, externalStream, onClosePatient, videoMode, vide
     return () => {
       cancelled = true;
     };
-  }, [videoMode, videoFileUrl, dynamicZones, zones]);
+  }, [videoMode, videoFileUrl, dynamicZones, zones, trackingActive]);
 
   const hasDiscrepancy =
     discrepancy &&
@@ -948,11 +961,13 @@ const CameraPreview = ({ forwardedRef, externalStream, videoFileUrl, videoMode }
     if (videoMode === 'file' && videoFileUrl && video) {
       video.srcObject = null;
       video.src = videoFileUrl;
-      return () => {};
+      return () => {
+      };
     }
 
     if (externalStream && video) {
       video.srcObject = externalStream;
+      video.play().catch(() => {});
       return () => {};
     }
 
@@ -964,6 +979,7 @@ const CameraPreview = ({ forwardedRef, externalStream, videoFileUrl, videoMode }
         });
         if (forwardedRef.current) {
           forwardedRef.current.srcObject = stream;
+          forwardedRef.current.play().catch(() => {});
         }
       } catch (err) {
         console.error("Error accessing camera for preview:", err);
